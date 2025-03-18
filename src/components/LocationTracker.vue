@@ -35,16 +35,31 @@ function getLocation() {
     (position) => {
       console.log('Position GPS brute:', position.coords)
       loading.value = false
-      location.value = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-        timestamp: new Date().toISOString(),
-      }
 
-      // Auto send if enabled
-      if (autoSend.value) {
-        sendToServer()
+      try {
+        // Ensure the coordinates are valid numbers
+        const latitude = parseFloat(position.coords.latitude)
+        const longitude = parseFloat(position.coords.longitude)
+        const accuracy = parseFloat(position.coords.accuracy) || 1
+
+        if (!isNaN(latitude) && !isNaN(longitude)) {
+          location.value = {
+            latitude,
+            longitude,
+            accuracy,
+            timestamp: new Date().toISOString(),
+          }
+
+          // Auto send if enabled
+          if (autoSend.value) {
+            sendToServer()
+          }
+        } else {
+          errorMsg.value = 'Les coordonnées reçues sont invalides'
+        }
+      } catch (error) {
+        console.error('Error processing geolocation data:', error)
+        errorMsg.value = 'Erreur lors du traitement des données de géolocalisation'
       }
     },
     (error) => {
@@ -99,13 +114,6 @@ async function sendToServer() {
   }
 }
 
-function toggleAutoSend() {
-  autoSend.value = !autoSend.value
-  if (autoSend.value && location.value && !isSending.value) {
-    sendToServer()
-  }
-}
-
 function toggleWatchPosition() {
   if (isWatching.value) {
     stopWatchPosition()
@@ -130,16 +138,31 @@ function startWatchPosition() {
     (position) => {
       loading.value = false
       errorMsg.value = ''
-      location.value = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-        timestamp: new Date().toISOString(),
-      }
 
-      // Auto send if enabled
-      if (autoSend.value) {
-        sendToServer()
+      try {
+        // Ensure the coordinates are valid numbers
+        const latitude = parseFloat(position.coords.latitude)
+        const longitude = parseFloat(position.coords.longitude)
+        const accuracy = parseFloat(position.coords.accuracy) || 1
+
+        if (!isNaN(latitude) && !isNaN(longitude)) {
+          location.value = {
+            latitude,
+            longitude,
+            accuracy,
+            timestamp: new Date().toISOString(),
+          }
+
+          // Auto send if enabled
+          if (autoSend.value) {
+            sendToServer()
+          }
+        } else {
+          errorMsg.value = 'Les coordonnées reçues sont invalides'
+        }
+      } catch (error) {
+        console.error('Error processing geolocation data:', error)
+        errorMsg.value = 'Erreur lors du traitement des données de géolocalisation'
       }
     },
     (error) => {
@@ -189,30 +212,60 @@ function initializeMap() {
 function updateMapWithLocation() {
   if (!map || !location.value) return
 
-  const pos = [location.value.latitude, location.value.longitude]
-
-  // Update map view
-  map.setView(pos, 15)
-
-  // Add or update marker
-  if (marker) {
-    marker.setLatLng(pos)
-  } else {
-    marker = window.L.marker(pos).addTo(map).bindPopup('Vous êtes ici').openPopup()
+  // Validate coordinates
+  if (!Number.isFinite(location.value.latitude) || !Number.isFinite(location.value.longitude)) {
+    console.error('Invalid coordinates:', location.value)
+    return
   }
 
-  // Remove previous accuracy circle
-  if (accuracyCircle) {
-    map.removeLayer(accuracyCircle)
-  }
+  try {
+    const pos = [location.value.latitude, location.value.longitude]
 
-  // Add accuracy circle
-  accuracyCircle = window.L.circle(pos, {
-    radius: location.value.accuracy / 10,
-    color: '#4CAF50',
-    fillColor: '#4CAF50',
-    fillOpacity: 0.15,
-  }).addTo(map)
+    // Update map view with a small delay to ensure map is ready
+    setTimeout(() => {
+      map.setView(pos, 15)
+
+      // Add or update marker
+      if (marker) {
+        marker.setLatLng(pos)
+      } else {
+        marker = window.L.marker(pos).addTo(map).bindPopup('Vous êtes ici').openPopup()
+      }
+
+      // Remove previous accuracy circle
+      if (accuracyCircle) {
+        try {
+          map.removeLayer(accuracyCircle)
+        } catch (error) {
+          console.error('Error removing accuracy circle:', error)
+        }
+        accuracyCircle = null
+      }
+
+      // Add accuracy circle with proper validation
+      const accuracyRadius = Math.max(1, location.value.accuracy || 1) // Ensure minimum radius of 1
+
+      if (Number.isFinite(accuracyRadius)) {
+        accuracyCircle = window.L.circle(pos, {
+          radius: accuracyRadius,
+          color: '#4CAF50',
+          fillColor: '#4CAF50',
+          fillOpacity: 0.15,
+        })
+        // Add the circle to map after a small delay to ensure map is ready
+        setTimeout(() => {
+          try {
+            accuracyCircle.addTo(map)
+          } catch (error) {
+            console.error('Error adding accuracy circle to map:', error)
+            accuracyCircle = null
+          }
+        }, 100)
+      }
+    }, 50)
+  } catch (error) {
+    console.error('Error updating map with location:', error)
+  }
 }
 
 onMounted(() => {
@@ -289,43 +342,21 @@ watch(location, () => {
         </div>
       </div>
 
-      <div
-        class="api-status"
-        :class="{ success: apiStatus.success === true, error: apiStatus.success === false }"
-      >
-        <span v-if="apiStatus.message">{{ apiStatus.message }}</span>
-        <span v-if="apiStatus.lastSent" class="last-sent">
-          Dernier envoi: {{ apiStatus.lastSent }}
-        </span>
-      </div>
-
       <div class="location-actions">
-        <div class="action-row">
-          <button @click="getLocation" class="update-button" :disabled="isSending">
-            <span class="button-text">Actualiser</span>
-          </button>
-          <button
-            @click="toggleWatchPosition"
-            class="watch-button"
-            :class="{ watching: isWatching }"
-          >
-            <span class="button-text">{{
-              isWatching ? 'Arrêter suivi' : 'Suivre en continu'
-            }}</span>
-          </button>
-        </div>
-
-        <div class="action-row server-actions">
-          <button @click="sendToServer" class="server-button" :disabled="isSending || !location">
-            <span v-if="isSending" class="button-loading"></span>
-            <span class="button-text">Envoyer au serveur</span>
-          </button>
-
-          <label class="auto-send-toggle">
-            <input type="checkbox" :checked="autoSend" @change="toggleAutoSend" />
-            <span class="toggle-label">Envoi automatique</span>
-          </label>
-        </div>
+        <button @click="getLocation" class="action-button update-button" :disabled="isSending">
+          <span class="button-icon">🔄</span>
+          <span class="button-text">Actualiser position</span>
+        </button>
+        <button
+          @click="toggleWatchPosition"
+          class="action-button watch-button"
+          :class="{ watching: isWatching }"
+        >
+          <span class="button-icon">{{ isWatching ? '⏹️' : '▶️' }}</span>
+          <span class="button-text">{{
+            isWatching ? 'Arrêter le suivi' : 'Suivre en continu'
+          }}</span>
+        </button>
       </div>
     </div>
 
@@ -407,7 +438,7 @@ h2 {
   padding: 15px;
   background-color: var(--primary-color-light, #e8f5e9);
   color: var(--primary-color-dark, #2e7d32);
-  border-radius: 8px;
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -419,34 +450,159 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
   width: 100%;
-  margin-bottom: 15px;
+  margin-bottom: 20px;
 }
 
 .data-item {
   display: flex;
   flex-direction: column;
-  padding: 8px;
-  border-radius: 6px;
+  padding: 10px;
+  border-radius: 8px;
   background-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+
+.data-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 .label {
   font-weight: 600;
   font-size: 0.85rem;
   margin-bottom: 4px;
+  color: var(--primary-color-dark, #2e7d32);
 }
 
 .value {
   font-family: monospace;
-  font-size: 1rem;
+  font-size: 1.1rem;
+  letter-spacing: 0.5px;
 }
 
+/* Updated location actions and buttons */
 .location-actions {
   display: flex;
-  gap: 10px;
-  margin-top: 10px;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.action-button {
+  position: relative;
+  padding: 14px 20px;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
+  gap: 10px;
+  transition: all 0.3s;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  overflow: hidden;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.action-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.button-icon {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.update-button {
+  background: linear-gradient(135deg, #43a047, #2e7d32);
+  color: white;
+}
+
+.watch-button {
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  color: white;
+}
+
+.watch-button.watching {
+  background: linear-gradient(135deg, #f44336, #d32f2f);
+}
+
+.action-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+}
+
+.action-button:active {
+  transform: translateY(0px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Responsive styles */
+@media (min-width: 640px) {
+  .location-info {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .location-data {
+    flex: 2;
+    min-width: 300px;
+    margin-bottom: 0;
+  }
+
+  .location-actions {
+    flex: 1;
+    min-width: 200px;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .action-button {
+    padding: 12px 16px;
+    font-size: 0.9rem;
+  }
+
+  .button-icon {
+    font-size: 1.1rem;
+  }
+
+  .data-item {
+    padding: 8px;
+  }
+
+  .value {
+    font-size: 1rem;
+  }
 }
 
 .no-data {
