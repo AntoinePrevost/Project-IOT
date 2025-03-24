@@ -1,119 +1,153 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { getRoute, searchPlaces } from '../services/routeService'
 
-// Références
+// Références principales
 const mapElement = ref(null)
 const startInput = ref('')
 const endInput = ref('')
 const loading = ref(false)
 const error = ref('')
+const routeInfo = ref(null)
+const selectedTransportMode = ref('driving-car')
+
+// Variables pour les suggestions d'adresses
 const startResults = ref([])
 const endResults = ref([])
 const showStartResults = ref(false)
 const showEndResults = ref(false)
-const routeInfo = ref(null)
-const selectedTransportMode = ref('driving-car')
+let searchTimeout = null
 
+// Variables Leaflet
 let map = null
 let routeLayer = null
 let startMarker = null
 let endMarker = null
-let debounceTimeout = null
 
+// Options de transport
 const transportModes = [
   { id: 'driving-car', name: 'Voiture', icon: '🚗' },
   { id: 'foot-walking', name: 'À pied', icon: '🚶' },
   { id: 'cycling-regular', name: 'Vélo', icon: '🚲' },
 ]
 
-// Recherche de lieux avec debounce
-async function searchStartPlaces() {
-  clearTimeout(debounceTimeout)
-  if (!startInput.value) {
+// Fonctions pour afficher/masquer les résultats de recherche
+function showStartResultsPanel() {
+  if (startResults.value.length > 0) {
+    showStartResults.value = true
+  }
+}
+
+function showEndResultsPanel() {
+  if (endResults.value.length > 0) {
+    showEndResults.value = true
+  }
+}
+
+// Recherche d'adresses
+async function searchStartAddress() {
+  clearTimeout(searchTimeout)
+  if (startInput.value.length < 3) {
     startResults.value = []
     showStartResults.value = false
     return
   }
 
-  debounceTimeout = setTimeout(async () => {
+  searchTimeout = setTimeout(async () => {
     try {
-      startResults.value = await searchPlaces(startInput.value)
-      showStartResults.value = true
+      loading.value = true
+      const results = await searchPlaces(startInput.value)
+      startResults.value = results || []
+      showStartResults.value = results.length > 0
     } catch (error) {
-      error.value = 'Erreur lors de la recherche'
+      error.value = "Erreur lors de la recherche d'adresses"
+    } finally {
+      loading.value = false
     }
-  }, 300)
+  }, 500)
 }
 
-async function searchEndPlaces() {
-  clearTimeout(debounceTimeout)
-  if (!endInput.value) {
+async function searchEndAddress() {
+  clearTimeout(searchTimeout)
+  if (endInput.value.length < 3) {
     endResults.value = []
     showEndResults.value = false
     return
   }
 
-  debounceTimeout = setTimeout(async () => {
+  searchTimeout = setTimeout(async () => {
     try {
-      endResults.value = await searchPlaces(endInput.value)
-      showEndResults.value = true
+      loading.value = true
+      const results = await searchPlaces(endInput.value)
+      endResults.value = results || []
+      showEndResults.value = results.length > 0
     } catch (error) {
-      error.value = 'Erreur lors de la recherche'
+      error.value = "Erreur lors de la recherche d'adresses"
+    } finally {
+      loading.value = false
     }
-  }, 300)
+  }, 500)
 }
 
-// Sélection des lieux
+// Sélection d'adresses
 function selectStartPlace(place) {
   startInput.value = place.display_name
   showStartResults.value = false
-
-  if (map) {
-    const coords = [parseFloat(place.lon), parseFloat(place.lat)]
-
-    if (startMarker) {
-      startMarker.setLatLng(coords)
-    } else {
-      startMarker = L.marker([place.lat, place.lon], {
-        icon: L.divIcon({
-          html: '🟢',
-          className: 'custom-marker start-marker',
-          iconSize: [30, 30],
-        }),
-      }).addTo(map)
-    }
-
-    map.setView([place.lat, place.lon], 13)
-  }
+  setMarker(place, true)
 }
 
 function selectEndPlace(place) {
   endInput.value = place.display_name
   showEndResults.value = false
+  setMarker(place, false)
+}
 
-  if (map) {
-    const coords = [parseFloat(place.lon), parseFloat(place.lat)]
+// Gestion des marqueurs sur la carte
+function setMarker(place, isStartPoint = true) {
+  if (!map || !window.L) return
 
-    if (endMarker) {
-      endMarker.setLatLng(coords)
-    } else {
-      endMarker = L.marker([place.lat, place.lon], {
-        icon: L.divIcon({
-          html: '🔴',
-          className: 'custom-marker end-marker',
-          iconSize: [30, 30],
-        }),
-      }).addTo(map)
+  try {
+    const lat = parseFloat(place.lat)
+    const lon = parseFloat(place.lon)
+
+    if (isNaN(lat) || isNaN(lon)) return
+
+    const markerIcon = window.L.divIcon({
+      html: isStartPoint ? '🟢' : '🔴',
+      className: 'custom-marker',
+      iconSize: [30, 30],
+    })
+
+    // Supprimer l'ancien marqueur s'il existe
+    if (isStartPoint && startMarker) {
+      map.removeLayer(startMarker)
+    } else if (!isStartPoint && endMarker) {
+      map.removeLayer(endMarker)
     }
 
-    map.setView([place.lat, place.lon], 13)
+    // Créer le nouveau marqueur
+    const marker = window.L.marker([lat, lon], { icon: markerIcon })
+      .addTo(map)
+      .bindPopup(isStartPoint ? 'Départ' : 'Arrivée')
+      .openPopup()
+
+    // Stocker la référence
+    if (isStartPoint) {
+      startMarker = marker
+    } else {
+      endMarker = marker
+    }
+
+    // Centrer la carte
+    map.setView([lat, lon], 13)
+  } catch (error) {
+    error.value = 'Impossible de placer le marqueur sur la carte'
   }
 }
 
-// Calculer l'itinéraire
+// Calcul d'itinéraire
 async function calculateRoute() {
-  if (!startInput.value || !endInput.value || !startMarker || !endMarker) {
+  if (!startMarker || !endMarker) {
     error.value = 'Veuillez sélectionner un point de départ et une destination'
     return
   }
@@ -122,122 +156,113 @@ async function calculateRoute() {
   error.value = ''
 
   try {
-    const startCoords = [startMarker.getLatLng().lng, startMarker.getLatLng().lat]
-    const endCoords = [endMarker.getLatLng().lng, endMarker.getLatLng().lat]
+    // Récupérer les coordonnées
+    const startPos = startMarker.getLatLng()
+    const endPos = endMarker.getLatLng()
+    const startCoords = [startPos.lng, startPos.lat]
+    const endCoords = [endPos.lng, endPos.lat]
 
+    // Appeler l'API
     const result = await getRoute(startCoords, endCoords, selectedTransportMode.value)
 
-    // Clear previous route
+    // Nettoyer l'ancien tracé
     if (routeLayer) {
       map.removeLayer(routeLayer)
     }
 
-    // Extract route coordinates and reverse lat/lng
+    // Tracer le nouvel itinéraire
     const routeCoords = result.features[0].geometry.coordinates.map((coord) => [coord[1], coord[0]])
 
-    // Draw route on map
-    routeLayer = L.polyline(routeCoords, {
+    routeLayer = window.L.polyline(routeCoords, {
       color: '#4CAF50',
-      weight: 6,
+      weight: 5,
       opacity: 0.7,
     }).addTo(map)
 
-    // Fit map to route bounds
-    map.fitBounds(routeLayer.getBounds(), {
-      padding: [50, 50],
-    })
+    // Ajuster la vue
+    map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] })
 
-    // Extract and save route information
-    const steps = result.features[0].properties.segments[0].steps
-    const distance = result.features[0].properties.segments[0].distance // in meters
-    const duration = result.features[0].properties.segments[0].duration // in seconds
-
+    // Afficher les informations
+    const summary = result.features[0].properties.summary
     routeInfo.value = {
-      distance: (distance / 1000).toFixed(2), // in km
-      duration: Math.round(duration / 60), // in minutes
-      steps: steps.map((step) => ({
-        instruction: step.instruction,
-        distance: (step.distance / 1000).toFixed(2),
-        duration: Math.round(step.duration / 60),
-      })),
+      distance: (summary.distance / 1000).toFixed(2),
+      duration: Math.round(summary.duration / 60),
     }
   } catch (err) {
-    error.value = "Erreur lors du calcul de l'itinéraire"
-    console.error(err)
+    error.value = `Erreur: ${err.message}`
   } finally {
     loading.value = false
   }
 }
 
+// Géolocalisation
+function useCurrentLocation(isStartPoint = true) {
+  if (!navigator.geolocation) {
+    error.value = 'Géolocalisation non supportée'
+    return
+  }
+
+  loading.value = true
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const currentPlace = {
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+        display_name: 'Ma position actuelle',
+      }
+
+      if (isStartPoint) {
+        startInput.value = 'Ma position actuelle'
+      } else {
+        endInput.value = 'Ma position actuelle'
+      }
+
+      setMarker(currentPlace, isStartPoint)
+      loading.value = false
+    },
+    () => {
+      error.value = "Impossible d'obtenir votre position"
+      loading.value = false
+    },
+    { enableHighAccuracy: true, timeout: 10000 },
+  )
+}
+
 // Initialisation de la carte
 function initializeMap() {
-  if (!map && mapElement.value && window.L) {
-    map = L.map(mapElement.value).setView([48.856614, 2.3522219], 11)
+  if (mapElement.value && window.L) {
+    map = window.L.map(mapElement.value).setView([48.856614, 2.3522219], 11)
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map)
   }
 }
 
-// Gérer la position actuelle
-function useCurrentLocation(forStart = true) {
-  if (!navigator.geolocation) {
-    error.value = "La géolocalisation n'est pas supportée par votre navigateur"
-    return
+// Fermeture des listes de suggestions
+function handleClickOutside(event) {
+  const startContainer = document.getElementById('start-results-container')
+  const endContainer = document.getElementById('end-results-container')
+
+  if (startContainer && !startContainer.contains(event.target)) {
+    showStartResults.value = false
   }
 
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const { latitude, longitude } = position.coords
-
-      if (forStart) {
-        if (startMarker) {
-          map.removeLayer(startMarker)
-        }
-        startMarker = L.marker([latitude, longitude], {
-          icon: L.divIcon({
-            html: '🟢',
-            className: 'custom-marker start-marker',
-            iconSize: [30, 30],
-          }),
-        }).addTo(map)
-        startInput.value = 'Ma position actuelle'
-        map.setView([latitude, longitude], 13)
-      } else {
-        if (endMarker) {
-          map.removeLayer(endMarker)
-        }
-        endMarker = L.marker([latitude, longitude], {
-          icon: L.divIcon({
-            html: '🔴',
-            className: 'custom-marker end-marker',
-            iconSize: [30, 30],
-          }),
-        }).addTo(map)
-        endInput.value = 'Ma position actuelle'
-        map.setView([latitude, longitude], 13)
-      }
-    },
-    (err) => {
-      error.value = 'Erreur lors de la récupération de votre position'
-    },
-  )
+  if (endContainer && !endContainer.contains(event.target)) {
+    showEndResults.value = false
+  }
 }
 
-// Initialisation
 onMounted(() => {
-  // Load Leaflet CSS if not already loaded
-  if (!document.querySelector('link[href*="leaflet.css"]')) {
+  // Charger Leaflet
+  if (!window.L) {
+    // CSS
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
     document.head.appendChild(link)
-  }
 
-  // Load Leaflet JS if not already loaded
-  if (!window.L) {
+    // JS
     const script = document.createElement('script')
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
     script.onload = initializeMap
@@ -246,130 +271,130 @@ onMounted(() => {
     initializeMap()
   }
 
-  // Close search results when clicking outside
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.search-container')) {
-      showStartResults.value = false
-      showEndResults.value = false
-    }
-  })
-})
+  // Gestionnaire pour fermer les suggestions
+  document.addEventListener('click', handleClickOutside)
 
-onUnmounted(() => {
-  document.removeEventListener('click', () => {})
+  // Nettoyage
+  return () => {
+    document.removeEventListener('click', handleClickOutside)
+  }
 })
 </script>
 
 <template>
   <div class="route-navigator">
-    <div class="route-controls">
-      <div class="search-section">
-        <h2>Rechercher un itinéraire</h2>
+    <h2>Calculateur d'itinéraires</h2>
 
-        <div class="search-container">
-          <div class="input-group">
-            <div class="input-with-icon">
-              <div class="icon">🟢</div>
-              <input
-                type="text"
-                placeholder="Point de départ"
-                v-model="startInput"
-                @input="searchStartPlaces"
-                @focus="showStartResults = !!startResults.length"
-              />
-              <button @click="useCurrentLocation(true)" class="location-btn">📍</button>
-            </div>
-            <div v-show="showStartResults" class="search-results">
-              <div
-                v-for="place in startResults"
-                :key="place.osm_id"
-                class="result-item"
-                @click="selectStartPlace(place)"
-              >
-                {{ place.display_name }}
-              </div>
-              <div v-if="startResults.length === 0" class="no-results">Aucun résultat trouvé</div>
-            </div>
-          </div>
-
-          <div class="input-group">
-            <div class="input-with-icon">
-              <div class="icon">🔴</div>
-              <input
-                type="text"
-                placeholder="Destination"
-                v-model="endInput"
-                @input="searchEndPlaces"
-                @focus="showEndResults = !!endResults.length"
-              />
-              <button @click="useCurrentLocation(false)" class="location-btn">📍</button>
-            </div>
-            <div v-show="showEndResults" class="search-results">
-              <div
-                v-for="place in endResults"
-                :key="place.osm_id"
-                class="result-item"
-                @click="selectEndPlace(place)"
-              >
-                {{ place.display_name }}
-              </div>
-              <div v-if="endResults.length === 0" class="no-results">Aucun résultat trouvé</div>
-            </div>
-          </div>
+    <!-- Formulaire avec suggestions d'adresses -->
+    <div class="search-form">
+      <!-- Point de départ -->
+      <div class="input-group" id="start-results-container">
+        <div class="input-label">
+          <span class="marker-icon">🟢</span>
+          <span>Départ</span>
         </div>
-
-        <div class="transport-modes">
+        <div class="input-row">
+          <input
+            type="text"
+            v-model="startInput"
+            placeholder="Entrez un lieu de départ"
+            @input="searchStartAddress"
+            @focus="showStartResultsPanel"
+          />
           <button
-            v-for="mode in transportModes"
-            :key="mode.id"
-            @click="selectedTransportMode = mode.id"
-            :class="{ active: selectedTransportMode === mode.id }"
-            class="transport-btn"
+            @click="useCurrentLocation(true)"
+            class="current-btn"
+            title="Utiliser ma position"
           >
-            <span class="mode-icon">{{ mode.icon }}</span>
-            <span class="mode-name">{{ mode.name }}</span>
+            📍
           </button>
         </div>
 
-        <button @click="calculateRoute" class="calculate-btn" :disabled="loading">
-          {{ loading ? 'Calcul en cours...' : "Calculer l'itinéraire" }}
-        </button>
-
-        <div v-if="error" class="error-msg">
-          {{ error }}
+        <!-- Suggestions -->
+        <div v-if="showStartResults" class="search-results">
+          <div v-if="startResults.length === 0" class="no-results">
+            {{ loading ? 'Recherche...' : 'Aucun résultat' }}
+          </div>
+          <div
+            v-for="place in startResults"
+            :key="`start-${place.place_id}`"
+            class="result-item"
+            @click="selectStartPlace(place)"
+          >
+            {{ place.display_name }}
+          </div>
         </div>
       </div>
 
-      <div v-if="routeInfo" class="route-info">
-        <div class="route-summary">
-          <h3>Résumé de l'itinéraire</h3>
-          <div class="summary-details">
-            <div class="summary-item">
-              <span class="label">Distance:</span>
-              <span class="value">{{ routeInfo.distance }} km</span>
-            </div>
-            <div class="summary-item">
-              <span class="label">Durée estimée:</span>
-              <span class="value">{{ routeInfo.duration }} min</span>
-            </div>
-          </div>
+      <!-- Destination -->
+      <div class="input-group" id="end-results-container">
+        <div class="input-label">
+          <span class="marker-icon">🔴</span>
+          <span>Destination</span>
+        </div>
+        <div class="input-row">
+          <input
+            type="text"
+            v-model="endInput"
+            placeholder="Entrez une destination"
+            @input="searchEndAddress"
+            @focus="showEndResultsPanel"
+          />
+          <button
+            @click="useCurrentLocation(false)"
+            class="current-btn"
+            title="Utiliser ma position"
+          >
+            📍
+          </button>
         </div>
 
-        <div class="route-steps">
-          <h3>Instructions</h3>
-          <div class="steps-list">
-            <div v-for="(step, index) in routeInfo.steps" :key="index" class="step-item">
-              <div class="step-number">{{ index + 1 }}</div>
-              <div class="step-details">
-                <div class="step-instruction">{{ step.instruction }}</div>
-                <div class="step-distance">{{ step.distance }} km</div>
-              </div>
-            </div>
+        <!-- Suggestions -->
+        <div v-if="showEndResults" class="search-results">
+          <div v-if="endResults.length === 0" class="no-results">
+            {{ loading ? 'Recherche...' : 'Aucun résultat' }}
+          </div>
+          <div
+            v-for="place in endResults"
+            :key="`end-${place.place_id}`"
+            class="result-item"
+            @click="selectEndPlace(place)"
+          >
+            {{ place.display_name }}
           </div>
         </div>
+      </div>
+
+      <!-- Modes de transport -->
+      <div class="transport-modes">
+        <button
+          v-for="mode in transportModes"
+          :key="mode.id"
+          @click="selectedTransportMode = mode.id"
+          :class="['mode-btn', { active: selectedTransportMode === mode.id }]"
+        >
+          <span class="mode-icon">{{ mode.icon }}</span>
+          <span>{{ mode.name }}</span>
+        </button>
+      </div>
+
+      <!-- Bouton de calcul -->
+      <button @click="calculateRoute" class="calculate-btn" :disabled="loading">
+        <span v-if="loading" class="loading-spinner"></span>
+        <span>{{ loading ? 'Calcul...' : "Calculer l'itinéraire" }}</span>
+      </button>
+
+      <!-- Message d'erreur -->
+      <div v-if="error" class="error-message">{{ error }}</div>
+
+      <!-- Résumé de l'itinéraire -->
+      <div v-if="routeInfo" class="route-summary">
+        <div class="summary-item"><strong>Distance:</strong> {{ routeInfo.distance }} km</div>
+        <div class="summary-item"><strong>Durée:</strong> {{ routeInfo.duration }} min</div>
       </div>
     </div>
 
+    <!-- Carte -->
     <div class="map-container" ref="mapElement"></div>
   </div>
 </template>
@@ -379,82 +404,95 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem;
+  gap: 1rem;
 }
 
-.route-controls {
-  background-color: var(--card-background, #fff);
-  border-radius: 12px;
-  padding: 15px;
-  margin-bottom: 15px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.search-section h2 {
-  font-size: 1.2rem;
-  margin-bottom: 15px;
-  color: var(--text-color, #2c3e50);
+h2 {
   text-align: center;
+  color: var(--text-color);
+  margin-bottom: 1rem;
 }
 
-.search-container {
+.search-form {
+  background-color: var(--card-background);
+  border-radius: 10px;
+  padding: 1rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 15px;
+  gap: 1rem;
 }
 
 .input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
   position: relative;
 }
 
-.input-with-icon {
+.input-label {
   display: flex;
   align-items: center;
-  position: relative;
+  gap: 0.5rem;
+  font-weight: 500;
 }
 
-.icon {
-  position: absolute;
-  left: 10px;
-  font-size: 1.1rem;
+.marker-icon {
+  font-size: 1.2rem;
+}
+
+.input-row {
+  display: flex;
+  position: relative;
 }
 
 input {
-  width: 100%;
-  padding: 12px 12px 12px 40px;
+  flex: 1;
+  padding: 0.75rem 1rem;
   border: 1px solid var(--border-color, #ddd);
   border-radius: 8px;
   font-size: 1rem;
-  background-color: var(--card-background, #fff);
-  color: var(--text-color, #333);
+  color: var(--text-color);
 }
 
-.location-btn {
+.current-btn {
   position: absolute;
-  right: 10px;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
   background: none;
   border: none;
   font-size: 1.2rem;
   cursor: pointer;
+  opacity: 0.6;
 }
 
+.current-btn:hover {
+  opacity: 1;
+}
+
+/* Suggestions */
 .search-results {
   position: absolute;
-  width: 100%;
-  max-height: 200px;
-  overflow-y: auto;
-  background-color: var(--card-background, #fff);
+  top: 100%;
+  left: 0;
+  right: 0;
+  background-color: var(--card-background);
   border: 1px solid var(--border-color, #ddd);
   border-radius: 0 0 8px 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  z-index: 1000;
+  z-index: 10;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .result-item {
-  padding: 10px 15px;
-  border-bottom: 1px solid var(--border-color, #ddd);
+  padding: 10px;
   cursor: pointer;
+  border-bottom: 1px solid var(--border-color, #eee);
+  font-size: 0.9rem;
 }
 
 .result-item:hover {
@@ -465,20 +503,23 @@ input {
   padding: 10px;
   text-align: center;
   color: #999;
+  font-style: italic;
+  font-size: 0.9rem;
 }
 
+/* Transport modes */
 .transport-modes {
   display: flex;
-  justify-content: space-around;
-  margin-bottom: 15px;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
-.transport-btn {
+.mode-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 8px 12px;
+  padding: 0.5rem;
   background: none;
   border: 2px solid transparent;
   border-radius: 8px;
@@ -486,8 +527,8 @@ input {
   transition: all 0.2s;
 }
 
-.transport-btn.active {
-  border-color: var(--primary-color, #4caf50);
+.mode-btn.active {
+  border-color: var(--primary-color);
   background-color: rgba(76, 175, 80, 0.1);
 }
 
@@ -495,21 +536,20 @@ input {
   font-size: 1.5rem;
 }
 
-.mode-name {
-  font-size: 0.8rem;
-  font-weight: 500;
-}
-
+/* Buttons */
 .calculate-btn {
   width: 100%;
-  padding: 12px;
-  background: linear-gradient(135deg, var(--primary-color, #4caf50), #2e7d32);
+  padding: 0.75rem;
+  background: var(--primary-color, #4caf50);
   color: white;
   border: none;
   border-radius: 8px;
-  font-weight: bold;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .calculate-btn:disabled {
@@ -517,151 +557,59 @@ input {
   cursor: not-allowed;
 }
 
-.calculate-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+.loading-spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 1s ease-in-out infinite;
 }
 
-.error-msg {
-  margin-top: 10px;
-  padding: 10px;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error-message {
+  padding: 0.75rem;
   background-color: var(--error-light, #ffebee);
   color: var(--error, #f44336);
-  border-radius: 4px;
+  border-radius: 8px;
   text-align: center;
 }
 
-.route-info {
-  margin-top: 15px;
-  padding-top: 15px;
-  border-top: 1px solid var(--border-color, #ddd);
-}
-
+/* Route summary */
 .route-summary {
-  margin-bottom: 15px;
-}
-
-.route-summary h3,
-.route-steps h3 {
-  font-size: 1.1rem;
-  margin-bottom: 10px;
-  color: var(--text-color, #2c3e50);
-}
-
-.summary-details {
   display: flex;
-  justify-content: space-between;
-}
-
-.summary-item {
-  background-color: rgba(0, 0, 0, 0.03);
-  padding: 8px 12px;
-  border-radius: 6px;
-}
-
-.summary-item .label {
-  font-weight: 500;
-  margin-right: 5px;
-}
-
-.steps-list {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid var(--border-color, #ddd);
+  justify-content: space-around;
+  padding: 0.75rem;
+  background-color: var(--primary-color-light, #e8f5e9);
   border-radius: 8px;
 }
 
-.step-item {
-  display: flex;
-  padding: 10px;
-  border-bottom: 1px solid var(--border-color, #ddd);
-}
-
-.step-item:last-child {
-  border-bottom: none;
-}
-
-.step-number {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background-color: var(--primary-color, #4caf50);
-  color: white;
-  border-radius: 50%;
-  margin-right: 10px;
-  flex-shrink: 0;
-}
-
-.step-details {
-  flex: 1;
-}
-
-.step-instruction {
-  margin-bottom: 5px;
-}
-
-.step-distance {
-  font-size: 0.8rem;
-  color: #666;
-}
-
+/* Map */
 .map-container {
-  flex-grow: 1;
-  height: 300px;
-  border-radius: 8px;
+  height: 400px;
+  border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border-color, #ddd);
 }
 
-/* Custom markers */
-:global(.custom-marker) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  color: inherit;
-  font-size: 20px;
-  transform: translateZ(0);
-  background: none;
-  border: none;
-}
-
+/* Responsive */
 @media (min-width: 768px) {
-  .route-navigator {
-    flex-direction: row;
-    gap: 20px;
+  .map-container {
     height: 500px;
   }
-
-  .route-controls {
-    width: 350px;
-    overflow-y: auto;
-    margin-bottom: 0;
-  }
-
-  .map-container {
-    flex: 1;
-    height: auto;
-  }
 }
 
-@media (max-width: 767px) {
-  .transport-modes {
-    overflow-x: auto;
-    justify-content: flex-start;
-    gap: 10px;
-    padding-bottom: 5px;
-  }
-
-  .transport-btn {
-    flex-shrink: 0;
-  }
-
-  .summary-details {
+@media (max-width: 600px) {
+  .route-summary {
     flex-direction: column;
-    gap: 8px;
+    gap: 0.5rem;
+    text-align: center;
   }
 }
 </style>
