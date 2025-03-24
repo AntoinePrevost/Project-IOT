@@ -1,10 +1,12 @@
 <script setup>
-import LocationTracker from './components/LocationTracker.vue'
+// import LocationTracker from './components/LocationTracker.vue'
 import { ref, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 const appTitle = ref('GeoLocator')
 const isDarkMode = ref(false)
 const mapElement = ref(null)
+const router = useRouter()
 let map = null
 
 function toggleDarkMode() {
@@ -45,6 +47,14 @@ function applyMapTheme() {
   }
 }
 
+// Active page for navigation
+const currentRoute = ref('home')
+
+function navigateTo(route) {
+  currentRoute.value = route
+  router.push({ name: route })
+}
+
 onMounted(() => {
   // Load Leaflet CSS if not already loaded
   if (!document.querySelector('link[href*="leaflet.css"]')) {
@@ -72,6 +82,14 @@ onMounted(() => {
   if (isDarkMode.value) {
     document.body.classList.add('dark-mode')
   }
+
+  // Update current route based on URL
+  const path = window.location.pathname
+  if (path.includes('navigation')) {
+    currentRoute.value = 'navigation'
+  } else {
+    currentRoute.value = 'home'
+  }
 })
 
 watch(isDarkMode, () => {
@@ -94,6 +112,28 @@ watch(isDarkMode, () => {
               <h1>{{ appTitle }}</h1>
             </div>
           </div>
+
+          <!-- Navigation Menu -->
+          <div class="nav-links">
+            <button
+              @click="navigateTo('home')"
+              class="nav-link"
+              :class="{ active: currentRoute === 'home' }"
+            >
+              <span class="nav-icon">🏠</span>
+              <span class="nav-text">Localisation</span>
+            </button>
+
+            <button
+              @click="navigateTo('navigation')"
+              class="nav-link"
+              :class="{ active: currentRoute === 'navigation' }"
+            >
+              <span class="nav-icon">🧭</span>
+              <span class="nav-text">Itinéraires</span>
+            </button>
+          </div>
+
           <div class="nav-controls">
             <button class="theme-toggle" @click="toggleDarkMode" aria-label="Toggle dark mode">
               <span v-if="isDarkMode">☀️</span>
@@ -105,7 +145,7 @@ watch(isDarkMode, () => {
 
       <main>
         <div class="floating-panel">
-          <LocationTracker />
+          <router-view />
         </div>
       </main>
 
@@ -234,6 +274,37 @@ h1 {
   color: transparent;
 }
 
+.nav-links {
+  display: flex;
+  gap: 10px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: none;
+  border: none;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.nav-link:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-link.active {
+  background-color: rgba(255, 255, 255, 0.2);
+  font-weight: 500;
+}
+
+.nav-icon {
+  font-size: 1.2rem;
+}
+
 .nav-controls {
   display: flex;
   align-items: center;
@@ -323,6 +394,25 @@ footer p {
 
   .navbar {
     padding: 0.25rem;
+  }
+}
+
+/* Responsive styles for navigation */
+@media (max-width: 640px) {
+  .nav-text {
+    display: none;
+  }
+
+  .nav-icon {
+    font-size: 1.4rem;
+  }
+
+  .nav-link {
+    padding: 8px;
+  }
+
+  .logo h1 {
+    font-size: 1.2rem;
   }
 }
 </style>
