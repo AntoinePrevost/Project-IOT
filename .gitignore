@@ -31,3 +31,6 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+
+# Python virtual environments
+project-iot-env/

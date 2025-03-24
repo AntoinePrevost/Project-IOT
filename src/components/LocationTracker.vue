@@ -41,12 +41,18 @@ function getLocation() {
         const latitude = parseFloat(position.coords.latitude)
         const longitude = parseFloat(position.coords.longitude)
         const accuracy = parseFloat(position.coords.accuracy) || 1
+        const altitude =
+          parseFloat(position.coords.altitude) !== null
+            ? parseFloat(position.coords.altitude)
+            : null
+        console.log(altitude)
 
         if (!isNaN(latitude) && !isNaN(longitude)) {
           location.value = {
             latitude,
             longitude,
             accuracy,
+            altitude,
             timestamp: new Date().toISOString(),
           }
 
@@ -93,6 +99,7 @@ async function sendToServer() {
       latitude: location.value.latitude,
       longitude: location.value.longitude,
       accuracy: location.value.accuracy,
+      altitude: location.value.altitude,
       timestamp: location.value.timestamp,
     })
 
@@ -339,6 +346,10 @@ watch(location, () => {
         <div class="data-item">
           <span class="label">Précision:</span>
           <span class="value">{{ Math.round(location.accuracy) }} mètres</span>
+        </div>
+        <div class="data-item" v-if="location.altitude !== null">
+          <span class="label">Altitude:</span>
+          <span class="value">{{ location.altitude.toFixed(2) }} mètres</span>
         </div>
       </div>
 
