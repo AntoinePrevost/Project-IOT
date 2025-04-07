@@ -1,11 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  getAllTracks,
-  deleteTrack,
-  exportTrackToGPX,
-} from '../services/trackingService'
+import { getAllTracks, deleteTrack, exportTrackToGPX } from '../services/trackingService'
 
 const router = useRouter()
 const tracks = ref([])
@@ -85,6 +81,11 @@ const viewTrackDetail = (id) => {
   router.push({ name: 'track-detail', params: { id } })
 }
 
+// Créer un nouveau trajet (redirection vers la page d'enregistrement)
+const createNewTrack = () => {
+  router.push({ name: 'track-recorder' })
+}
+
 // Exporter un trajet en GPX
 const exportGPX = (id) => {
   const gpxContent = exportTrackToGPX(id)
@@ -114,6 +115,13 @@ onMounted(() => {
 <template>
   <div class="tracks-view">
     <h2>Historique des trajets</h2>
+
+    <!-- Bouton pour créer un nouveau trajet -->
+    <div class="new-track-container">
+      <button @click="createNewTrack" class="new-track-button">
+        <span class="icon">➕</span> Enregistrer un nouveau trajet
+      </button>
+    </div>
 
     <!-- Barre de recherche et options de tri -->
     <div class="search-and-sort">
@@ -146,10 +154,7 @@ onMounted(() => {
 
       <div v-else-if="tracks.length === 0" class="no-tracks">
         <p>Aucun trajet enregistré</p>
-        <p class="hint">
-          Utilisez l'option "Suivi d'activité" sur l'écran principal pour enregistrer vos
-          déplacements
-        </p>
+        <p class="hint">Utilisez le bouton "Enregistrer un nouveau trajet" pour commencer</p>
       </div>
 
       <div v-else-if="sortedTracks.length === 0" class="no-results">
@@ -389,6 +394,53 @@ h2 {
 .delete-button:hover {
   background-color: var(--error, #f44336);
   color: white;
+}
+
+.new-track-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.new-track-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.8rem 1.5rem;
+  background-color: var(--primary-color, #4caf50);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    transform 0.1s;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.new-track-button:hover {
+  background-color: var(--primary-color-dark, #388e3c);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.new-track-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.new-track-button .icon {
+  font-size: 1.2rem;
+}
+
+/* Ajustement responsive pour le bouton */
+@media (max-width: 480px) {
+  .new-track-button {
+    width: 100%;
+    justify-content: center;
+    padding: 0.7rem 1rem;
+  }
 }
 
 @media (max-width: 600px) {

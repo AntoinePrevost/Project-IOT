@@ -1,4 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import HomeView from '../views/HomeView.vue'
+import NavigationView from '../views/NavigationView.vue'
+import TracksView from '../views/TracksView.vue'
+import TrackDetailView from '../views/TrackDetailView.vue'
+import TrackRecorderView from '../views/TrackRecorderView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -6,23 +11,28 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: () => import('../views/HomeView.vue'),
+      component: HomeView,
     },
     {
       path: '/navigation',
       name: 'navigation',
-      component: () => import('../views/NavigationView.vue'),
+      component: NavigationView,
     },
     {
       path: '/tracks',
       name: 'tracks',
-      component: () => import('../views/TracksView.vue'),
+      component: TracksView,
     },
     {
       path: '/track/:id',
       name: 'track-detail',
-      component: () => import('../views/TrackDetailView.vue'),
+      component: TrackDetailView,
       props: true,
+    },
+    {
+      path: '/track-recorder',
+      name: 'track-recorder',
+      component: TrackRecorderView,
     },
   ],
 })

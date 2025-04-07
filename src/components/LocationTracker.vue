@@ -1,13 +1,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { sendLocationData } from '../services/locationService'
-import {
-  startTrack,
-  addPointToTrack,
-  stopTrack,
-  getCurrentTrack,
-} from '../services/trackingService'
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const location = ref(null)
 const errorMsg = ref('')
 const loading = ref(false)
@@ -18,142 +14,9 @@ const isSending = ref(false)
 const apiStatus = ref({ success: false, message: '', lastSent: null })
 const autoSend = ref(false)
 
-// Nouvelle référence pour le suivi d'activité
-const trackingActive = ref(false)
-const currentTrack = ref(null)
-const trackDetails = ref({
-  distance: 0,
-  duration: '00:00:00',
-  points: 0,
-})
-const trackTimer = ref(null)
-const trackStartTime = ref(null)
-
 let map = null
 let marker = null
 let accuracyCircle = null
-let trackPolyline = null // Nouvelle variable pour le tracé du trajet
-
-// Formater la durée en HH:MM:SS
-function formatDuration(seconds) {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-
-  return [
-    hours.toString().padStart(2, '0'),
-    minutes.toString().padStart(2, '0'),
-    secs.toString().padStart(2, '0'),
-  ].join(':')
-}
-
-// Mise à jour des détails du suivi
-function updateTrackInfo() {
-  if (!currentTrack.value) return
-
-  // Mettre à jour la distance
-  trackDetails.value.distance = (currentTrack.value.distance / 1000).toFixed(2)
-
-  // Mettre à jour le nombre de points
-  trackDetails.value.points = currentTrack.value.points.length
-
-  // Mettre à jour la durée
-  if (trackStartTime.value) {
-    const elapsed =
-      currentTrack.value.duration || Math.floor((Date.now() - trackStartTime.value) / 1000)
-    trackDetails.value.duration = formatDuration(elapsed)
-  }
-}
-
-// Démarrer le suivi d'activité
-function startTracking() {
-  // Vérifier la géolocalisation
-  if (!navigator.geolocation) {
-    errorMsg.value = "La géolocalisation n'est pas supportée par votre navigateur"
-    return
-  }
-
-  // Demander le nom du trajet (facultatif)
-  const trackName = prompt(
-    'Nom du trajet (facultatif):',
-    `Trajet du ${new Date().toLocaleDateString()}`,
-  )
-  if (trackName === null) return // L'utilisateur a annulé
-
-  // Démarrer le trajet
-  currentTrack.value = startTrack(trackName)
-  trackStartTime.value = Date.now()
-
-  // Activer le suivi
-  trackingActive.value = true
-
-  // Démarrer le timer pour mettre à jour la durée
-  trackTimer.value = setInterval(() => {
-    updateTrackInfo()
-  }, 1000)
-
-  // Démarrer la géolocalisation si pas déjà active
-  if (!isWatching.value) {
-    startWatchPosition()
-  } else {
-    // Si déjà en observation, ajouter le point actuel
-    if (location.value) {
-      addPointToTrack(location.value)
-      updateTrackInfo()
-      updateTrackDisplay()
-    }
-  }
-}
-
-// Arrêter le suivi d'activité
-function stopTracking() {
-  // Demander confirmation
-  if (!confirm("Êtes-vous sûr de vouloir arrêter l'enregistrement du trajet ?")) {
-    return
-  }
-
-  // Arrêter le trajet
-  stopTrack()
-
-  // Réinitialiser les variables
-  trackingActive.value = false
-  currentTrack.value = null
-  trackStartTime.value = null
-
-  // Arrêter le timer
-  if (trackTimer.value) {
-    clearInterval(trackTimer.value)
-    trackTimer.value = null
-  }
-
-  // Effacer le tracé sur la carte
-  if (trackPolyline && map) {
-    map.removeLayer(trackPolyline)
-    trackPolyline = null
-  }
-}
-
-// Mettre à jour l'affichage du tracé sur la carte
-function updateTrackDisplay() {
-  if (!map || !currentTrack.value || !trackingActive.value) return
-
-  const points = currentTrack.value.points.map((point) => [point.latitude, point.longitude])
-
-  if (points.length < 2) return
-
-  // Supprimer l'ancien tracé
-  if (trackPolyline) {
-    map.removeLayer(trackPolyline)
-  }
-
-  // Créer le nouveau tracé
-  trackPolyline = window.L.polyline(points, {
-    color: '#FF9800',
-    weight: 4,
-    opacity: 0.7,
-    lineJoin: 'round',
-  }).addTo(map)
-}
 
 function getLocation() {
   loading.value = true
@@ -195,13 +58,6 @@ function getLocation() {
             altitude,
             speed,
             timestamp: new Date().toISOString(),
-          }
-
-          // Ajouter le point au trajet si le suivi est actif
-          if (trackingActive.value && currentTrack.value) {
-            currentTrack.value = addPointToTrack(location.value)
-            updateTrackInfo()
-            updateTrackDisplay()
           }
 
           // Auto send if enabled
@@ -313,13 +169,6 @@ function startWatchPosition() {
             timestamp: new Date().toISOString(),
           }
 
-          // Ajouter le point au trajet si le suivi est actif
-          if (trackingActive.value && currentTrack.value) {
-            currentTrack.value = addPointToTrack(location.value)
-            updateTrackInfo()
-            updateTrackDisplay()
-          }
-
           // Auto send if enabled
           if (autoSend.value) {
             sendToServer()
@@ -363,6 +212,11 @@ function stopWatchPosition() {
   isWatching.value = false
 }
 
+// Rediriger vers la page d'enregistrement de trajet
+function startTrackRecording() {
+  router.push({ name: 'track-recorder' })
+}
+
 function initializeMap() {
   if (!map && mapElement.value && window.L) {
     // Initialize the Leaflet map
@@ -373,38 +227,6 @@ function initializeMap() {
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map)
-
-    // Vérifier s'il y a un suivi en cours
-    checkForActiveTrack()
-  }
-}
-
-// Vérifier s'il y a un suivi en cours
-function checkForActiveTrack() {
-  const active = getCurrentTrack()
-  if (active && active.active) {
-    currentTrack.value = active
-    trackingActive.value = true
-    trackStartTime.value = new Date(active.startTime).getTime()
-
-    // Démarrer le timer
-    trackTimer.value = setInterval(() => {
-      updateTrackInfo()
-    }, 1000)
-
-    // Mettre à jour les infos
-    updateTrackInfo()
-
-    // Afficher le tracé
-    if (map && active.points.length > 1) {
-      const points = active.points.map((point) => [point.latitude, point.longitude])
-      trackPolyline = window.L.polyline(points, {
-        color: '#FF9800',
-        weight: 4,
-        opacity: 0.7,
-        lineJoin: 'round',
-      }).addTo(map)
-    }
   }
 }
 
@@ -499,10 +321,6 @@ onUnmounted(() => {
   if (watchId.value !== null) {
     navigator.geolocation.clearWatch(watchId.value)
   }
-
-  if (trackTimer.value) {
-    clearInterval(trackTimer.value)
-  }
 })
 
 watch(location, () => {
@@ -530,36 +348,6 @@ watch(location, () => {
     </div>
 
     <div v-else-if="location" class="location-info">
-      <!-- Panneau de suivi d'activité -->
-      <div v-if="trackingActive" class="tracking-panel">
-        <div class="tracking-header">
-          <span class="tracking-icon">📍</span>
-          <span class="tracking-status">Suivi en cours</span>
-        </div>
-
-        <div class="tracking-details">
-          <div class="tracking-item">
-            <span class="tracking-label">Distance</span>
-            <span class="tracking-value">{{ trackDetails.distance }} km</span>
-          </div>
-
-          <div class="tracking-item">
-            <span class="tracking-label">Durée</span>
-            <span class="tracking-value">{{ trackDetails.duration }}</span>
-          </div>
-
-          <div class="tracking-item">
-            <span class="tracking-label">Points</span>
-            <span class="tracking-value">{{ trackDetails.points }}</span>
-          </div>
-        </div>
-
-        <button @click="stopTracking" class="tracking-stop-button">
-          <span class="button-icon">⏹️</span>
-          <span class="button-text">Arrêter l'enregistrement</span>
-        </button>
-      </div>
-
       <div class="location-data">
         <div class="data-item">
           <span class="label">Latitude:</span>
@@ -600,14 +388,9 @@ watch(location, () => {
         </button>
 
         <!-- Bouton pour démarrer l'enregistrement d'un trajet -->
-        <button
-          v-if="!trackingActive"
-          @click="startTracking"
-          class="action-button track-button"
-          :disabled="!isWatching"
-        >
+        <button @click="startTrackRecording" class="action-button track-button">
           <span class="button-icon">📝</span>
-          <span class="button-text">Enregistrer le trajet</span>
+          <span class="button-text">Enregistrer un trajet</span>
         </button>
       </div>
     </div>
@@ -793,6 +576,12 @@ h2 {
 
 .watch-button.watching {
   background: linear-gradient(135deg, #f44336, #d32f2f);
+}
+
+.track-button {
+  background: linear-gradient(135deg, #2196f3, #1565c0);
+  color: white;
+  margin-top: 8px;
 }
 
 .action-button:hover {
@@ -1060,108 +849,4 @@ button:hover {
     gap: 8px;
   }
 }
-
-/* Styles pour le panneau de suivi d'activité */
-.tracking-panel {
-  background-color: var(--secondary-color-light, #e3f2fd);
-  border-radius: 12px;
-  padding: 15px;
-  margin-bottom: 20px;
-  width: 100%;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-}
-
-.tracking-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 12px;
-  color: var(--secondary-color-dark, #0d47a1);
-  font-weight: 600;
-  font-size: 1.1rem;
-}
-
-.tracking-icon {
-  font-size: 1.3rem;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.2);
-    opacity: 0.8;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.tracking-details {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 15px;
-  padding: 10px;
-  background-color: rgba(255, 255, 255, 0.5);
-  border-radius: 8px;
-}
-
-.tracking-item {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 80px;
-}
-
-.tracking-label {
-  font-size: 0.8rem;
-  color: var(--text-secondary, #666);
-  margin-bottom: 2px;
-}
-
-.tracking-value {
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: var(--secondary-color-dark, #0d47a1);
-}
-
-.tracking-stop-button {
-  width: 100%;
-  padding: 10px;
-  background-color: var(--error, #f44336);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: background-color 0.2s;
-}
-
-.tracking-stop-button:hover {
-  background-color: var(--error-dark, #d32f2f);
-}
-
-/* Style pour le bouton d'enregistrement de trajet */
-.track-button {
-  background: linear-gradient(135deg, #1e88e5, #1565c0);
-  color: white;
-}
-
-.track-button:disabled {
-  background: linear-gradient(135deg, #90caf9, #64b5f6);
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
-/* ...existing media queries and other styles... */
 </style>
