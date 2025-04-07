@@ -87,6 +87,10 @@ onMounted(() => {
   const path = window.location.pathname
   if (path.includes('navigation')) {
     currentRoute.value = 'navigation'
+  } else if (path.includes('tracks')) {
+    currentRoute.value = 'tracks'
+  } else if (path.includes('preferences')) {
+    currentRoute.value = 'preferences'
   } else {
     currentRoute.value = 'home'
   }
@@ -140,6 +144,15 @@ watch(isDarkMode, () => {
             >
               <span class="nav-icon">📝</span>
               <span class="nav-text">Mes Trajets</span>
+            </button>
+
+            <button
+              @click="navigateTo('preferences')"
+              class="nav-link"
+              :class="{ active: currentRoute === 'preferences' }"
+            >
+              <span class="nav-icon">👤</span>
+              <span class="nav-text">Préférences</span>
             </button>
           </div>
 

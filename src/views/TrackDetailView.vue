@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import { getTrackById, deleteTrack, exportTrackToGPX } from '../services/trackingService'
-import { calculateTrackStatistics } from '../services/trackService'
+import { calculateTrackStatistics, prepareTrackData } from '../services/trackService'
 import TrackStats from '../components/TrackStats.vue'
 import TrackVisualizer from '../components/TrackVisualizer.vue'
 
@@ -69,13 +69,37 @@ const goBack = () => {
 onMounted(async () => {
   try {
     isLoading.value = true
-    // Utiliser getTrackById depuis trackingService
-    track.value = getTrackById(route.params.id)
+    console.log('Chargement du trajet ID:', route.params.id)
 
-    if (!track.value) {
+    // Utiliser getTrackById depuis trackingService
+    const rawTrack = getTrackById(route.params.id)
+
+    if (!rawTrack) {
       error.value = 'Trajet introuvable'
       isLoading.value = false
       return
+    }
+
+    console.log('Trajet brut récupéré:', rawTrack.id, 'Points:', rawTrack.points?.length || 0)
+
+    // Préparer les données du trajet (nettoyer et valider)
+    const cleanedTrack = prepareTrackData(rawTrack)
+    track.value = cleanedTrack
+
+    console.log('Trajet nettoyé:', track.value.id, 'Points:', track.value.points?.length || 0)
+
+    // Vérifier la validité des points pour la carte
+    if (track.value.points && track.value.points.length > 0) {
+      const validCoords = track.value.points.filter(
+        (p) =>
+          typeof p.latitude === 'number' &&
+          typeof p.longitude === 'number' &&
+          !isNaN(p.latitude) &&
+          !isNaN(p.longitude),
+      )
+      console.log(
+        `Points avec coordonnées valides: ${validCoords.length} sur ${track.value.points.length}`,
+      )
     }
 
     isLoading.value = false

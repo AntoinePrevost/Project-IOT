@@ -1,8 +1,8 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { startTrack, addPointToTrack, stopTrack } from '../services/trackingService'
-import { formatDuration, formatSpeed } from '../utils/formatters'
+import { formatDuration } from '../utils/formatters'
 import TrackMap from '../components/TrackMap.vue'
 import TrackStatsCard from '../components/TrackStatsCard.vue'
 import RecordingControls from '../components/RecordingControls.vue'
@@ -126,27 +126,33 @@ function stopRecording() {
 
   // Enregistrer les données de vitesse dans le track
   if (currentTrack.value) {
-    // Stocker l'historique de vitesse dans le trajet pour analyse ultérieure
-    currentTrack.value.speedData = {
+    // S'assurer que currentTrack est mis à jour avec l'historique complet
+    const speedData = {
       history: [...speedHistory.value],
       timeLabels: [...timeLabels.value],
       maxSpeed: maxSpeed.value,
       averageSpeed: averageSpeed.value,
     }
-  }
 
-  // Finaliser le trajet
-  const finishedTrack = stopTrack()
-  isRecording.value = false
-  isPaused.value = false
+    // Finaliser le trajet en passant les données de vitesse
+    const finishedTrack = stopTrack({ speedData })
+    isRecording.value = false
+    isPaused.value = false
 
-  // Rediriger vers le détail du trajet
-  if (finishedTrack && finishedTrack.id) {
-    router.push({
-      name: 'track-detail',
-      params: { id: finishedTrack.id },
-    })
+    // Rediriger vers le détail du trajet
+    if (finishedTrack && finishedTrack.id) {
+      router.push({
+        name: 'track-detail',
+        params: { id: finishedTrack.id },
+      })
+    } else {
+      router.push({ name: 'tracks' })
+    }
   } else {
+    // Si pour une raison quelconque currentTrack est null
+    stopTrack()
+    isRecording.value = false
+    isPaused.value = false
     router.push({ name: 'tracks' })
   }
 }

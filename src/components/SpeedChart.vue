@@ -30,6 +30,14 @@ const chartWidth = computed(() => {
 function renderChart() {
   if (!chartContainer.value || !window.Chart) return
 
+  // Vérifier si nous avons des données à afficher
+  if (!props.chartData || !props.chartData.datasets || props.chartData.datasets.length === 0) {
+    console.log('Pas de données pour le graphique')
+    return
+  }
+
+  console.log('Rendu du graphique avec', props.chartData.labels?.length || 0, 'points')
+
   // Détruire le graphique existant s'il y en a un
   if (chart) {
     chart.destroy()
@@ -108,11 +116,29 @@ onMounted(() => {
 <template>
   <div class="speed-chart" :style="{ height: chartHeight, width: chartWidth }">
     <canvas ref="chartContainer"></canvas>
+
+    <!-- Afficher un message si pas de données -->
+    <div
+      v-if="!chartData || !chartData.datasets || chartData.datasets.length === 0"
+      class="no-data-message"
+    >
+      Pas de données de vitesse disponibles pour ce trajet
+    </div>
   </div>
 </template>
 
 <style scoped>
 .speed-chart {
   position: relative;
+}
+
+.no-data-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #999;
+  font-style: italic;
+  text-align: center;
 }
 </style>

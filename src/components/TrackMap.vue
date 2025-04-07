@@ -26,52 +26,142 @@ const mapElement = ref(null)
 let map = null
 let trackPolyline = null
 let positionMarker = null
+let markers = []
+
+// Debug: Afficher les points reçus
+watch(
+  () => props.points,
+  (newPoints) => {
+    console.log('Points reçus dans TrackMap:', newPoints.length)
+    if (newPoints.length > 0) {
+      console.log('Premier point:', newPoints[0])
+      console.log('Dernier point:', newPoints[newPoints.length - 1])
+    }
+  },
+  { immediate: true },
+)
 
 // Initialiser la carte
 const initializeMap = () => {
   if (!mapElement.value || !window.L) return
 
-  // Créer la carte
-  map = window.L.map(mapElement.value)
+  console.log('Initialisation de la carte Leaflet')
 
-  // Ajouter les tuiles OpenStreetMap
-  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).addTo(map)
+  try {
+    // Créer la carte avec des options de débogage
+    map = window.L.map(mapElement.value, {
+      attributionControl: true,
+      zoomControl: true,
+    })
 
-  // Afficher les points s'il y en a
-  updateMapDisplay()
+    // Ajouter les tuiles OpenStreetMap
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map)
 
-  // Émettre un événement pour indiquer que la carte est chargée
-  emit('map-loaded', map)
+    // Afficher les points s'il y en a
+    updateMapDisplay()
+
+    // Émettre un événement pour indiquer que la carte est chargée
+    emit('map-loaded', map)
+  } catch (error) {
+    console.error("Erreur lors de l'initialisation de la carte:", error)
+  }
+}
+
+// Nettoyer la carte
+const clearMap = () => {
+  if (!map) return
+
+  if (trackPolyline) {
+    map.removeLayer(trackPolyline)
+    trackPolyline = null
+  }
+
+  if (positionMarker) {
+    map.removeLayer(positionMarker)
+    positionMarker = null
+  }
+
+  // Supprimer tous les marqueurs existants
+  markers.forEach((marker) => {
+    if (map.hasLayer(marker)) {
+      map.removeLayer(marker)
+    }
+  })
+  markers = []
+}
+
+// Ajouter des marqueurs de début et de fin
+const addStartEndMarkers = (points) => {
+  if (!map || points.length < 2) return
+
+  try {
+    // Marqueur de départ
+    const startPoint = points[0]
+    const startMarker = window.L.marker([startPoint.latitude, startPoint.longitude], {
+      icon: window.L.divIcon({
+        html: '<div class="start-marker">D</div>',
+        className: 'start-marker-icon',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      }),
+    }).addTo(map)
+    markers.push(startMarker)
+
+    // Marqueur d'arrivée
+    const endPoint = points[points.length - 1]
+    const endMarker = window.L.marker([endPoint.latitude, endPoint.longitude], {
+      icon: window.L.divIcon({
+        html: '<div class="end-marker">A</div>',
+        className: 'end-marker-icon',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      }),
+    }).addTo(map)
+    markers.push(endMarker)
+  } catch (error) {
+    console.error("Erreur lors de l'ajout des marqueurs:", error)
+  }
 }
 
 // Mettre à jour l'affichage de la carte
 const updateMapDisplay = () => {
-  if (!map || !props.points || props.points.length === 0) return
+  if (!map) return
 
-  // Convertir les points en format pour Leaflet
-  const points = props.points.map((point) => [point.latitude, point.longitude])
+  console.log("Mise à jour de l'affichage de la carte")
 
-  // Créer ou mettre à jour le tracé
-  if (trackPolyline) {
-    trackPolyline.setLatLngs(points)
-  } else {
+  try {
+    // Nettoyer d'abord la carte
+    clearMap()
+
+    if (!props.points || props.points.length === 0) {
+      console.log('Pas de points à afficher')
+      // Centrer sur une position par défaut si pas de points
+      map.setView([48.8566, 2.3522], 13) // Paris par défaut
+      return
+    }
+
+    console.log(`Affichage de ${props.points.length} points sur la carte`)
+
+    // Convertir les points en format pour Leaflet
+    const points = props.points.map((point) => [point.latitude, point.longitude])
+
+    // Créer le tracé
     trackPolyline = window.L.polyline(points, {
       color: '#4CAF50',
       weight: 5,
       opacity: 0.7,
       lineJoin: 'round',
     }).addTo(map)
-  }
 
-  // Ajouter le marqueur de position actuelle si disponible
-  if (props.currentPoint) {
-    const currentPos = [props.currentPoint.latitude, props.currentPoint.longitude]
+    // Ajouter des marqueurs pour le début et la fin
+    addStartEndMarkers(props.points)
 
-    if (positionMarker) {
-      positionMarker.setLatLng(currentPos)
-    } else {
+    // Ajouter le marqueur de position actuelle si disponible
+    if (props.currentPoint) {
+      const currentPos = [props.currentPoint.latitude, props.currentPoint.longitude]
       positionMarker = window.L.marker(currentPos, {
         icon: window.L.divIcon({
           html: '<div class="current-position-marker"></div>',
@@ -81,11 +171,23 @@ const updateMapDisplay = () => {
         }),
       }).addTo(map)
     }
-  }
 
-  // Ajuster la vue pour voir tout le tracé
-  if (points.length > 0) {
-    map.fitBounds(trackPolyline.getBounds(), { padding: [50, 50] })
+    // Ajuster la vue pour voir tout le tracé
+    if (trackPolyline) {
+      try {
+        map.fitBounds(trackPolyline.getBounds(), { padding: [50, 50] })
+      } catch (error) {
+        console.error("Erreur lors de l'ajustement de la vue:", error)
+
+        // Fallback: centrer sur le premier point
+        if (props.points.length > 0) {
+          const firstPoint = props.points[0]
+          map.setView([firstPoint.latitude, firstPoint.longitude], 13)
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Erreur lors de la mise à jour de l'affichage:", error)
   }
 }
 
@@ -93,6 +195,8 @@ const updateMapDisplay = () => {
 const loadDependencies = () => {
   // Ne charger Leaflet que s'il n'est pas déjà chargé
   if (!window.L) {
+    console.log('Chargement de Leaflet')
+
     // CSS
     if (!document.querySelector('link[href*="leaflet.css"]')) {
       const link = document.createElement('link')
@@ -104,9 +208,16 @@ const loadDependencies = () => {
     // JavaScript
     const script = document.createElement('script')
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = initializeMap
+    script.onload = () => {
+      console.log('Leaflet chargé avec succès')
+      initializeMap()
+    }
+    script.onerror = (error) => {
+      console.error('Erreur lors du chargement de Leaflet:', error)
+    }
     document.head.appendChild(script)
   } else {
+    console.log('Leaflet déjà chargé')
     initializeMap()
   }
 }
@@ -114,7 +225,8 @@ const loadDependencies = () => {
 // Surveiller les changements de points
 watch(
   () => props.points,
-  () => {
+  (newPoints) => {
+    console.log('Points mis à jour dans TrackMap, nouveau nombre:', newPoints.length)
     if (map) {
       updateMapDisplay()
     }
@@ -125,9 +237,9 @@ watch(
 // Surveiller le point actuel
 watch(
   () => props.currentPoint,
-  () => {
-    if (map && props.currentPoint) {
-      const currentPos = [props.currentPoint.latitude, props.currentPoint.longitude]
+  (newPoint) => {
+    if (map && newPoint) {
+      const currentPos = [newPoint.latitude, newPoint.longitude]
 
       if (positionMarker) {
         positionMarker.setLatLng(currentPos)
@@ -144,6 +256,7 @@ watch(
 
 // Initialisation au montage du composant
 onMounted(() => {
+  console.log('TrackMap monté, points:', props.points.length)
   loadDependencies()
 })
 </script>
@@ -180,6 +293,33 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: none !important;
+}
+
+:global(.start-marker),
+:global(.end-marker) {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 12px;
+  color: white;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+:global(.start-marker) {
+  background-color: #4caf50;
+}
+
+:global(.end-marker) {
+  background-color: #f44336;
+}
+
+:global(.start-marker-icon),
+:global(.end-marker-icon) {
   background: none !important;
 }
 </style>

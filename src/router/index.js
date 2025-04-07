@@ -4,6 +4,7 @@ import NavigationView from '../views/NavigationView.vue'
 import TracksView from '../views/TracksView.vue'
 import TrackDetailView from '../views/TrackDetailView.vue'
 import TrackRecorderView from '../views/TrackRecorderView.vue'
+import UserPreferencesView from '../views/UserPreferencesView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -33,6 +34,11 @@ const router = createRouter({
       path: '/track-recorder',
       name: 'track-recorder',
       component: TrackRecorderView,
+    },
+    {
+      path: '/preferences',
+      name: 'preferences',
+      component: UserPreferencesView,
     },
   ],
 })

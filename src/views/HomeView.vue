@@ -1,13 +1,6 @@
 <script setup>
-import { useRouter } from 'vue-router'
 import LocationTracker from '../components/LocationTracker.vue'
 
-const router = useRouter()
-
-// Fonction pour rediriger vers la page d'enregistrement de trajets
-const redirectToTrackRecorder = () => {
-  router.push({ name: 'track-recorder' })
-}
 </script>
 
 <template>

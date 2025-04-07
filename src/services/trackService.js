@@ -171,6 +171,55 @@ export function calculateTrackStatistics(track) {
 }
 
 /**
+ * Prépare les points d'un trajet pour l'affichage sur la carte
+ * Filtre les points invalides et s'assure que les coordonnées sont des nombres
+ * @param {Array} points - Les points du trajet
+ * @returns {Array} - Les points validés et préparés pour la carte
+ */
+export function preparePointsForMap(points) {
+  if (!points || !Array.isArray(points) || points.length === 0) {
+    console.warn('Pas de points à préparer pour la carte')
+    return []
+  }
+
+  console.log(`Préparation de ${points.length} points pour la carte`)
+
+  // Filtrer les points valides (avec latitude et longitude numériques)
+  const validPoints = points
+    .filter((point) => {
+      // Vérifier que les propriétés existent
+      if (
+        !point ||
+        typeof point.latitude === 'undefined' ||
+        typeof point.longitude === 'undefined'
+      ) {
+        return false
+      }
+
+      // Convertir en nombres si nécessaire
+      const lat = typeof point.latitude === 'string' ? parseFloat(point.latitude) : point.latitude
+      const lng =
+        typeof point.longitude === 'string' ? parseFloat(point.longitude) : point.longitude
+
+      // Vérifier que ce sont des nombres valides
+      return !isNaN(lat) && !isNaN(lng) && isFinite(lat) && isFinite(lng)
+    })
+    .map((point) => {
+      // S'assurer que latitude et longitude sont des nombres
+      return {
+        ...point,
+        latitude: typeof point.latitude === 'string' ? parseFloat(point.latitude) : point.latitude,
+        longitude:
+          typeof point.longitude === 'string' ? parseFloat(point.longitude) : point.longitude,
+      }
+    })
+
+  console.log(`${validPoints.length} points valides sur ${points.length}`)
+
+  return validPoints
+}
+
+/**
  * Crée un hook réutilisable pour traiter les données d'un trajet
  * @param {Object} trackData - Les données brutes du trajet
  * @returns {Object} - Les données traitées et les statistiques

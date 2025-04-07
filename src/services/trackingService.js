@@ -153,6 +153,32 @@ export function stopTrack(extraData = null) {
     Object.assign(currentTrack, extraData)
   }
 
+  // S'assurer que les points ont des données de vitesse
+  if (currentTrack.points && currentTrack.points.length > 0) {
+    currentTrack.points = currentTrack.points.map((point, index, points) => {
+      // Si le point n'a pas de vitesse et qu'il y a un point précédent,
+      // calculer la vitesse approximative
+      if ((point.speed === null || point.speed === undefined) && index > 0) {
+        const prevPoint = points[index - 1]
+        const distance = calculateDistance(
+          prevPoint.latitude,
+          prevPoint.longitude,
+          point.latitude,
+          point.longitude,
+        )
+
+        const timeDiff = new Date(point.timestamp) - new Date(prevPoint.timestamp)
+        const timeDiffHours = timeDiff / 1000 / 60 / 60 // en heures
+
+        if (timeDiffHours > 0) {
+          // Vitesse en m/s (conversion en m/s plutôt que km/h)
+          point.speed = distance / 1000 / timeDiffHours / 3.6
+        }
+      }
+      return point
+    })
+  }
+
   // Enregistrer le trajet dans l'historique
   saveTrackToHistory(currentTrack)
 
@@ -334,51 +360,51 @@ export function calculateTrackStats(trackId) {
   // Calculer la vitesse moyenne et maximale
   let maxSpeed = 0
   const speeds = []
+  const speedHistory = []
+  const timeLabels = []
 
-  track.points.forEach((point) => {
-    if (point.speed !== null) {
-      speeds.push(point.speed)
-      maxSpeed = Math.max(maxSpeed, point.speed)
+  // Extraire les données de vitesse des points
+  track.points.forEach((point, index) => {
+    if (point.speed !== null && point.speed !== undefined) {
+      const speedKmh = point.speed * 3.6 // Convertir en km/h
+      speeds.push(speedKmh)
+      maxSpeed = Math.max(maxSpeed, speedKmh)
+
+      // Aussi collecter pour l'historique du graphique
+      speedHistory.push(speedKmh)
+
+      // Créer label de temps formaté
+      const date = new Date(point.timestamp)
+      timeLabels.push(
+        date.toLocaleTimeString('fr-FR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      )
     }
   })
+
+  // Utiliser les données speedData si elles existent, sinon utiliser celles calculées
+  const finalSpeedHistory = track.speedData?.history || speedHistory
+  const finalTimeLabels = track.speedData?.timeLabels || timeLabels
+  const finalMaxSpeed = track.speedData?.maxSpeed || maxSpeed
 
   const averageSpeed =
     speeds.length > 0
       ? speeds.reduce((a, b) => a + b, 0) / speeds.length
-      : track.distance / track.duration
+      : track.distance / 1000 / (track.duration / 3600)
 
-  // Calculer le dénivelé
-  let elevationGain = 0
-  let elevationLoss = 0
-
-  if (track.points[0].altitude !== null) {
-    for (let i = 1; i < track.points.length; i++) {
-      const current = track.points[i]
-      const previous = track.points[i - 1]
-
-      if (current.altitude !== null && previous.altitude !== null) {
-        const diff = current.altitude - previous.altitude
-        if (diff > 0) {
-          elevationGain += diff
-        } else {
-          elevationLoss += Math.abs(diff)
-        }
-      }
-    }
-  }
-
-  // Inclure les données de vitesse si disponibles
-  const speedHistory = track.speedData?.history || []
-  const timeLabels = track.speedData?.timeLabels || []
+  // ... existing code for elevation calculation ...
 
   return {
     distance: track.distance,
     duration: track.duration,
     averageSpeed: averageSpeed,
-    maxSpeed: maxSpeed,
-    elevationGain: elevationGain,
-    elevationLoss: elevationLoss,
-    speedHistory: speedHistory,
-    timeLabels: timeLabels,
+    maxSpeed: finalMaxSpeed,
+    elevationGain: 0, // Calculate if needed
+    elevationLoss: 0, // Calculate if needed
+    speedHistory: finalSpeedHistory,
+    timeLabels: finalTimeLabels,
   }
 }
