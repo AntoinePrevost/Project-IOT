@@ -132,6 +132,15 @@ watch(isDarkMode, () => {
               <span class="nav-icon">🧭</span>
               <span class="nav-text">Itinéraires</span>
             </button>
+
+            <button
+              @click="navigateTo('tracks')"
+              class="nav-link"
+              :class="{ active: currentRoute === 'tracks' }"
+            >
+              <span class="nav-icon">📝</span>
+              <span class="nav-text">Mes Trajets</span>
+            </button>
           </div>
 
           <div class="nav-controls">
@@ -368,6 +377,101 @@ footer p {
 }
 
 /* Responsive styles */
+@media (max-width: 768px) {
+  .floating-panel {
+    max-width: 100%;
+    margin-top: 0.25rem;
+    border-radius: 12px;
+  }
+
+  main {
+    padding: 0.5rem;
+    align-items: flex-start;
+  }
+
+  .nav-links {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: var(--header-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    justify-content: space-around;
+    padding: 8px 0;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+  }
+
+  .nav-link {
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .nav-text {
+    display: block;
+    font-size: 0.7rem;
+  }
+
+  footer {
+    padding: 0.5rem;
+    margin-bottom: 56px; /* Espace pour la navigation en bas */
+  }
+
+  main {
+    max-height: calc(100vh - 180px);
+  }
+}
+
+@media (max-width: 480px) {
+  h1 {
+    font-size: 1.2rem;
+  }
+
+  .logo-icon {
+    font-size: 1.4rem;
+  }
+
+  header {
+    padding: 0.25rem;
+  }
+
+  .navbar {
+    padding: 0.25rem;
+  }
+
+  .floating-panel {
+    border-radius: 10px;
+    padding: 6px;
+  }
+}
+
+/* Styles pour orientation paysage sur mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .floating-panel {
+    max-height: calc(100vh - 100px);
+  }
+
+  header {
+    padding: 0.25rem;
+  }
+
+  .nav-links {
+    flex-direction: row;
+  }
+
+  .nav-link {
+    flex-direction: row;
+    padding: 4px 8px;
+  }
+
+  footer {
+    display: none; /* Masquer le footer en mode paysage pour gagner de l'espace */
+  }
+}
+
 @media (max-width: 768px) {
   .floating-panel {
     max-width: 100%;

@@ -13,6 +13,17 @@ const router = createRouter({
       name: 'navigation',
       component: () => import('../views/NavigationView.vue'),
     },
+    {
+      path: '/tracks',
+      name: 'tracks',
+      component: () => import('../views/TracksView.vue'),
+    },
+    {
+      path: '/track/:id',
+      name: 'track-detail',
+      component: () => import('../views/TrackDetailView.vue'),
+      props: true,
+    },
   ],
 })
 
