@@ -1,11 +1,15 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { startTrack, addPointToTrack, stopTrack } from '../services/trackingService'
-import { formatDuration } from '../utils/formatters'
+import { formatDuration, formatSpeed } from '../utils/formatters'
+import TrackMap from '../components/TrackMap.vue'
+import TrackStatsCard from '../components/TrackStatsCard.vue'
+import RecordingControls from '../components/RecordingControls.vue'
+import ErrorMessage from '../components/ErrorMessage.vue'
+import SpeedChart from '../components/SpeedChart.vue'
 
 const router = useRouter()
-const mapElement = ref(null)
 const trackName = ref(`Trajet du ${new Date().toLocaleDateString()}`)
 
 // État du suivi
@@ -22,15 +26,48 @@ const elapsedTime = ref('00:00:00')
 const distance = ref(0)
 const currentSpeed = ref(0)
 const maxSpeed = ref(0)
+const averageSpeed = ref(0)
 
-// Variables pour Leaflet
-let map = null
-let trackPolyline = null
-let positionMarker = null
+// Variables pour le suivi
 let watchId = null
+const speedHistory = ref([])
+const timeLabels = ref([])
 
-// Formater la durée en HH:MM:SS
-// ...existing code...
+// Limite de points d'historique à afficher sur le graphique
+const MAX_HISTORY_POINTS = 30
+
+// Points du tracé pour la carte
+const trackPoints = computed(() => {
+  if (!currentTrack.value || !currentTrack.value.points) return []
+  return currentTrack.value.points
+})
+
+// Données du graphique de vitesse
+const speedChartData = computed(() => {
+  return {
+    labels: timeLabels.value,
+    datasets: [
+      {
+        label: 'Vitesse (km/h)',
+        data: speedHistory.value,
+        borderColor: '#4CAF50',
+        backgroundColor: 'rgba(76, 175, 80, 0.2)',
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true,
+      },
+      {
+        label: 'Vitesse moyenne (km/h)',
+        data: Array(speedHistory.value.length).fill(averageSpeed.value),
+        borderColor: '#2196F3',
+        borderWidth: 2,
+        borderDash: [5, 5],
+        fill: false,
+        pointRadius: 0,
+      },
+    ],
+  }
+})
 
 // Démarrer l'enregistrement d'un trajet
 function startRecording() {
@@ -38,6 +75,10 @@ function startRecording() {
     errorMsg.value = "La géolocalisation n'est pas supportée par votre navigateur"
     return
   }
+
+  // Réinitialiser les données d'historique
+  speedHistory.value = []
+  timeLabels.value = []
 
   // Créer un nouveau trajet avec le nom fourni
   currentTrack.value = startTrack(trackName.value)
@@ -47,6 +88,7 @@ function startRecording() {
 
   // Réinitialiser les données
   maxSpeed.value = 0
+  averageSpeed.value = 0
 
   // Démarrer la capture de position
   startPositionTracking()
@@ -82,16 +124,27 @@ function stopRecording() {
     watchId = null
   }
 
+  // Enregistrer les données de vitesse dans le track
+  if (currentTrack.value) {
+    // Stocker l'historique de vitesse dans le trajet pour analyse ultérieure
+    currentTrack.value.speedData = {
+      history: [...speedHistory.value],
+      timeLabels: [...timeLabels.value],
+      maxSpeed: maxSpeed.value,
+      averageSpeed: averageSpeed.value,
+    }
+  }
+
   // Finaliser le trajet
-  stopTrack()
+  const finishedTrack = stopTrack()
   isRecording.value = false
   isPaused.value = false
 
   // Rediriger vers le détail du trajet
-  if (currentTrack.value && currentTrack.value.id) {
+  if (finishedTrack && finishedTrack.id) {
     router.push({
       name: 'track-detail',
-      params: { id: currentTrack.value.id },
+      params: { id: finishedTrack.id },
     })
   } else {
     router.push({ name: 'tracks' })
@@ -134,11 +187,11 @@ function handlePositionUpdate(position) {
     }
 
     // Mettre à jour la vitesse actuelle (km/h)
-    currentSpeed.value = (speed * 3.6).toFixed(1)
+    currentSpeed.value = speed * 3.6
 
     // Mettre à jour la vitesse maximale
-    if (speed * 3.6 > maxSpeed.value) {
-      maxSpeed.value = speed * 3.6
+    if (currentSpeed.value > maxSpeed.value) {
+      maxSpeed.value = currentSpeed.value
     }
 
     // Ajouter le point au trajet si l'enregistrement est actif
@@ -147,11 +200,31 @@ function handlePositionUpdate(position) {
 
       // Mettre à jour la distance
       if (currentTrack.value) {
-        distance.value = (currentTrack.value.distance / 1000).toFixed(2)
+        distance.value = currentTrack.value.distance / 1000
       }
 
-      // Mettre à jour la carte
-      updateMapDisplay()
+      // Ajouter à l'historique de vitesse pour le graphique
+      const currentTime = new Date()
+      timeLabels.value.push(
+        currentTime.toLocaleTimeString('fr-FR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      )
+      speedHistory.value.push(currentSpeed.value)
+
+      // Limiter la taille de l'historique pour le graphique
+      if (speedHistory.value.length > MAX_HISTORY_POINTS) {
+        speedHistory.value = speedHistory.value.slice(-MAX_HISTORY_POINTS)
+        timeLabels.value = timeLabels.value.slice(-MAX_HISTORY_POINTS)
+      }
+
+      // Calculer la vitesse moyenne
+      if (speedHistory.value.length > 0) {
+        const sum = speedHistory.value.reduce((a, b) => a + b, 0)
+        averageSpeed.value = sum / speedHistory.value.length
+      }
     }
   } catch (error) {
     console.error('Erreur de traitement des données GPS:', error)
@@ -181,49 +254,6 @@ function handlePositionError(error) {
   }
 }
 
-// Mettre à jour l'affichage de la carte
-function updateMapDisplay() {
-  if (!map || !currentTrack.value || !currentTrack.value.points.length) return
-
-  const points = currentTrack.value.points.map((point) => [point.latitude, point.longitude])
-
-  // Créer ou mettre à jour le tracé
-  if (trackPolyline) {
-    trackPolyline.setLatLngs(points)
-  } else {
-    trackPolyline = window.L.polyline(points, {
-      color: '#4CAF50',
-      weight: 5,
-      opacity: 0.7,
-      lineJoin: 'round',
-    }).addTo(map)
-  }
-
-  // Mise à jour du marqueur de position
-  const currentPos = [currentPosition.value.latitude, currentPosition.value.longitude]
-
-  if (positionMarker) {
-    positionMarker.setLatLng(currentPos)
-  } else {
-    positionMarker = window.L.marker(currentPos, {
-      icon: window.L.divIcon({
-        html: '<div class="current-position-marker"></div>',
-        className: 'current-position-icon',
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
-      }),
-    }).addTo(map)
-  }
-
-  // Centrer la carte si nécessaire
-  map.setView(currentPos, map.getZoom() || 15)
-
-  // Ajuster le zoom pour voir tout le tracé si nécessaire
-  if (points.length > 2 && points.length % 5 === 0) {
-    map.fitBounds(trackPolyline.getBounds(), { padding: [50, 50] })
-  }
-}
-
 // Mettre à jour le compteur de temps
 function updateElapsedTime() {
   if (!isRecording.value) return
@@ -235,39 +265,6 @@ function updateElapsedTime() {
   elapsedTime.value = formatDuration(elapsed)
 
   setTimeout(updateElapsedTime, 1000)
-}
-
-// Initialiser la carte
-function initializeMap() {
-  if (!mapElement.value || !window.L) return
-
-  map = window.L.map(mapElement.value).setView([48.856614, 2.3522219], 13)
-
-  window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).addTo(map)
-}
-
-// Chargement dynamique des bibliothèques nécessaires
-function loadDependencies() {
-  // Charger Leaflet si nécessaire
-  if (!window.L) {
-    // CSS
-    if (!document.querySelector('link[href*="leaflet.css"]')) {
-      const link = document.createElement('link')
-      link.rel = 'stylesheet'
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-      document.head.appendChild(link)
-    }
-
-    // JavaScript
-    const script = document.createElement('script')
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = initializeMap
-    document.head.appendChild(script)
-  } else {
-    initializeMap()
-  }
 }
 
 // Annuler l'enregistrement et revenir à la liste
@@ -285,10 +282,15 @@ function cancelRecording() {
   }
 
   if (isRecording.value) {
-    stopTrack() // Arrêter le trajet sans le sauvegarder
+    stopTrack() // Arrêter le trajet sans le sauvegarder complètement
   }
 
   router.push({ name: 'tracks' })
+}
+
+// Effacer le message d'erreur
+function dismissError() {
+  errorMsg.value = ''
 }
 
 // Cycle de vie du composant
@@ -302,9 +304,6 @@ onMounted(() => {
       }
     })
   }
-
-  // Charger les dépendances
-  loadDependencies()
 })
 
 onUnmounted(() => {
@@ -320,88 +319,55 @@ onUnmounted(() => {
   <div class="track-recorder">
     <h2>Enregistrement de trajet</h2>
 
-    <div v-if="errorMsg" class="error-message">
-      {{ errorMsg }}
-      <button @click="errorMsg = ''" class="dismiss-button">×</button>
-    </div>
+    <ErrorMessage v-if="errorMsg" :message="errorMsg" @dismiss="dismissError" />
 
     <!-- Contrôles d'enregistrement -->
-    <div class="recording-controls">
-      <input
-        v-if="!isRecording"
-        v-model="trackName"
-        type="text"
-        placeholder="Nom du trajet"
-        class="track-name-input"
-      />
-
-      <div class="button-group">
-        <template v-if="!isRecording">
-          <button @click="startRecording" class="start-button">
-            <span class="icon">▶️</span>
-            <span class="label">Démarrer l'enregistrement</span>
-          </button>
-        </template>
-
-        <template v-else>
-          <button v-if="!isPaused" @click="pauseRecording" class="pause-button">
-            <span class="icon">⏸️</span>
-            <span class="label">Pause</span>
-          </button>
-
-          <button v-else @click="resumeRecording" class="resume-button">
-            <span class="icon">▶️</span>
-            <span class="label">Reprendre</span>
-          </button>
-
-          <button @click="stopRecording" class="stop-button">
-            <span class="icon">⏹️</span>
-            <span class="label">Terminer</span>
-          </button>
-        </template>
-
-        <button @click="cancelRecording" class="cancel-button">
-          <span class="icon">✖️</span>
-          <span class="label">Annuler</span>
-        </button>
-      </div>
-    </div>
+    <RecordingControls
+      v-model:trackName="trackName"
+      :isRecording="isRecording"
+      :isPaused="isPaused"
+      @start-recording="startRecording"
+      @pause-recording="pauseRecording"
+      @resume-recording="resumeRecording"
+      @stop-recording="stopRecording"
+      @cancel-recording="cancelRecording"
+    />
 
     <!-- Statistiques temps réel -->
-    <div class="stats-panel">
-      <div class="stat-card">
-        <div class="stat-icon">⏱️</div>
-        <div class="stat-name">Durée</div>
-        <div class="stat-value">{{ elapsedTime }}</div>
+    <TrackStatsCard
+      :elapsedTime="elapsedTime"
+      :distance="distance"
+      :currentSpeed="currentSpeed"
+      :maxSpeed="maxSpeed"
+      :averageSpeed="averageSpeed"
+    />
+
+    <div class="split-view">
+      <!-- Carte pour le suivi en temps réel -->
+      <div class="map-container">
+        <TrackMap :points="trackPoints" :currentPoint="currentPosition" height="350px" />
       </div>
 
-      <div class="stat-card">
-        <div class="stat-icon">📏</div>
-        <div class="stat-name">Distance</div>
-        <div class="stat-value">{{ distance }} km</div>
+      <!-- Graphique de vitesse en temps réel -->
+      <div class="chart-container" v-if="isRecording && speedHistory.length > 1">
+        <div class="chart-header">
+          <h3>Vitesse en temps réel</h3>
+        </div>
+        <SpeedChart :chartData="speedChartData" :height="350" />
       </div>
-
-      <div class="stat-card">
-        <div class="stat-icon">⚡</div>
-        <div class="stat-name">Vitesse</div>
-        <div class="stat-value">{{ currentSpeed }} km/h</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-icon">🚀</div>
-        <div class="stat-name">Vitesse max</div>
-        <div class="stat-value">{{ maxSpeed.toFixed(1) }} km/h</div>
+      <div v-else class="chart-placeholder">
+        <div class="placeholder-content">
+          <span class="placeholder-icon">📊</span>
+          <p>Le graphique de vitesse s'affichera ici pendant l'enregistrement</p>
+        </div>
       </div>
     </div>
-
-    <!-- Carte pour le suivi en temps réel -->
-    <div class="map-container" ref="mapElement"></div>
 
     <!-- Note informative pour l'utilisateur -->
     <div class="info-note">
       <p>
         <span class="info-icon">ℹ️</span>
-        L'affichage du graphique de vitesse sera disponible après avoir terminé l'enregistrement.
+        Des analyses détaillées seront disponibles après avoir terminé l'enregistrement.
       </p>
     </div>
   </div>
@@ -409,7 +375,7 @@ onUnmounted(() => {
 
 <style scoped>
 .track-recorder {
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 1rem;
   display: flex;
@@ -423,138 +389,66 @@ h2 {
   color: var(--text-color);
 }
 
-.error-message {
-  background-color: var(--error-light, #ffebee);
-  color: var(--error, #f44336);
-  padding: 1rem;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.dismiss-button {
-  background: none;
-  border: none;
-  color: inherit;
-  font-size: 1.5rem;
-  cursor: pointer;
-}
-
-.recording-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  background-color: var(--card-background);
-  padding: 1rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.track-name-input {
-  width: 100%;
-  padding: 0.8rem;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 8px;
-  font-size: 1rem;
-}
-
-.button-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.8rem;
-  justify-content: center;
-}
-
-.start-button,
-.pause-button,
-.resume-button,
-.stop-button,
-.cancel-button {
-  padding: 0.8rem 1.5rem;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.start-button {
-  background-color: var(--primary-color, #4caf50);
-  color: white;
-}
-
-.pause-button {
-  background-color: var(--accent-color, #ff9800);
-  color: white;
-}
-
-.resume-button {
-  background-color: var(--primary-color, #4caf50);
-  color: white;
-}
-
-.stop-button {
-  background-color: var(--secondary-color, #2196f3);
-  color: white;
-}
-
-.cancel-button {
-  background-color: var(--error, #f44336);
-  color: white;
-}
-
-.icon {
-  font-size: 1.2rem;
-}
-
-.stats-panel {
+.split-view {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 1rem;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 960px) {
+  .split-view {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.map-container,
+.chart-container {
   background-color: var(--card-background);
-  padding: 1rem;
   border-radius: 12px;
+  overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+.chart-container {
   padding: 1rem;
-  background-color: var(--primary-color-light, #e8f5e9);
-  border-radius: 8px;
-  text-align: center;
 }
 
-.stat-icon {
-  font-size: 1.5rem;
-  margin-bottom: 0.5rem;
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
 }
 
-.stat-name {
-  font-size: 0.9rem;
-  color: var(--text-secondary, #666);
-  margin-bottom: 0.25rem;
-}
-
-.stat-value {
-  font-size: 1.2rem;
-  font-weight: 600;
+.chart-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
   color: var(--text-color);
 }
 
-.map-container {
-  width: 100%;
-  height: 400px;
+.chart-placeholder {
+  background-color: var(--card-background);
   border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--border-color, #ddd);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  height: 350px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.placeholder-content {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text-secondary, #666);
+}
+
+.placeholder-icon {
+  font-size: 3rem;
+  opacity: 0.5;
 }
 
 .info-note {
@@ -575,53 +469,5 @@ h2 {
 
 .info-icon {
   font-size: 1.2rem;
-}
-
-.current-position-marker {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background-color: #2196f3;
-  border: 3px solid white;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-}
-
-@media (max-width: 768px) {
-  .button-group {
-    flex-direction: column;
-  }
-
-  .stats-panel {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .map-container {
-    height: 300px;
-  }
-}
-
-@media (max-width: 480px) {
-  .track-recorder {
-    padding: 0.5rem;
-    gap: 1rem;
-  }
-
-  .label {
-    display: none; /* Masquer le texte des boutons sur petit écran */
-  }
-
-  .button-group {
-    flex-direction: row;
-  }
-
-  .start-button,
-  .pause-button,
-  .resume-button,
-  .stop-button,
-  .cancel-button {
-    padding: 0.8rem;
-    flex: 1;
-    justify-content: center;
-  }
 }
 </style>

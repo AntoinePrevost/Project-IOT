@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, defineProps } from 'vue'
 import { sendLocationData } from '../services/locationService'
 import { useRouter } from 'vue-router'
 
@@ -13,6 +13,13 @@ const isWatching = ref(false)
 const isSending = ref(false)
 const apiStatus = ref({ success: false, message: '', lastSent: null })
 const autoSend = ref(false)
+
+const props = defineProps({
+  disableContinuousTracking: {
+    type: Boolean,
+    default: false,
+  },
+})
 
 let map = null
 let marker = null
@@ -376,7 +383,10 @@ watch(location, () => {
           <span class="button-icon">🔄</span>
           <span class="button-text">Actualiser position</span>
         </button>
+
+        <!-- Afficher le bouton de suivi continu seulement si non désactivé -->
         <button
+          v-if="!props.disableContinuousTracking"
           @click="toggleWatchPosition"
           class="action-button watch-button"
           :class="{ watching: isWatching }"

@@ -1,61 +1,50 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useToast } from 'vue-toastification'
 import { getTrackById, deleteTrack, exportTrackToGPX } from '../services/trackingService'
-import { formatDuration, formatDate, formatDistance } from '../utils/formatters'
+import { calculateTrackStatistics } from '../services/trackService'
+import TrackStats from '../components/TrackStats.vue'
 import TrackVisualizer from '../components/TrackVisualizer.vue'
 
+const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const track = ref(null)
-const loading = ref(true)
+const isLoading = ref(true)
 const error = ref(null)
 
-const trackId = computed(() => route.params.id)
-
-// Calculer quelques statistiques complémentaires
-const avgSpeed = computed(() => {
-  if (!track.value) return 0
-  // Vitesse moyenne (km/h)
-  return track.value.distance / 1000 / (track.value.duration / 3600)
+// Calculer les statistiques à partir du track
+const statistics = computed(() => {
+  if (!track.value)
+    return {
+      distance: 0,
+      duration: '00:00:00',
+      avgSpeed: 0,
+      maxSpeed: 0,
+      elevGain: 0,
+      elevLoss: 0,
+    }
+  return calculateTrackStatistics(track.value)
 })
 
-// Charger les données du trajet
-const loadTrack = () => {
-  loading.value = true
-  error.value = null
-
-  try {
-    const trackData = getTrackById(trackId.value)
-
-    if (!trackData) {
-      error.value = 'Trajet non trouvé'
-      loading.value = false
-      return
-    }
-
-    track.value = trackData
-  } catch (err) {
-    error.value = `Erreur lors du chargement du trajet: ${err.message}`
-    console.error('Erreur lors du chargement du trajet:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
-// Supprimer le trajet
+// Supprimer le trajet et retourner à la liste
 const handleDeleteTrack = () => {
   if (confirm('Êtes-vous sûr de vouloir supprimer ce trajet?')) {
-    deleteTrack(trackId.value)
-    router.push({ name: 'tracks' })
+    if (deleteTrack(route.params.id)) {
+      toast.success('Trajet supprimé avec succès')
+      router.push({ name: 'tracks' })
+    } else {
+      toast.error('Erreur lors de la suppression du trajet')
+    }
   }
 }
 
 // Exporter le trajet en GPX
-const exportGPX = () => {
-  const gpxContent = exportTrackToGPX(trackId.value)
+const exportToGPX = () => {
+  const gpxContent = exportTrackToGPX(route.params.id)
   if (!gpxContent) {
-    alert("Erreur lors de l'exportation du trajet")
+    toast.error("Impossible d'exporter le trajet")
     return
   }
 
@@ -63,95 +52,90 @@ const exportGPX = () => {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `track_${trackId.value}.gpx`
+  a.download = `${track.value.name || 'track'}.gpx`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+
+  toast.success('Trajet exporté avec succès')
 }
 
-onMounted(() => {
-  loadTrack()
+// Retourner à la liste des trajets
+const goBack = () => {
+  router.push({ name: 'tracks' })
+}
+
+onMounted(async () => {
+  try {
+    isLoading.value = true
+    // Utiliser getTrackById depuis trackingService
+    track.value = getTrackById(route.params.id)
+
+    if (!track.value) {
+      error.value = 'Trajet introuvable'
+      isLoading.value = false
+      return
+    }
+
+    isLoading.value = false
+  } catch (err) {
+    console.error('Erreur lors du chargement du trajet:', err)
+    error.value = 'Impossible de charger les données du trajet'
+    isLoading.value = false
+  }
 })
 </script>
 
 <template>
-  <div class="track-detail-view">
-    <!-- En-tête et actions -->
+  <div class="track-detail">
     <div class="header-actions">
-      <button @click="router.push({ name: 'tracks' })" class="back-button">
+      <button @click="goBack" class="back-button">
         <span class="icon">←</span>
-        <span class="label">Retour à la liste</span>
+        <span>Retour</span>
       </button>
 
-      <div class="actions">
-        <button @click="exportGPX" class="action-button export-button">
+      <div class="actions" v-if="track">
+        <button @click="exportToGPX" class="action-button export-button">
           <span class="icon">📥</span>
-          <span class="label">Exporter (GPX)</span>
+          <span>Exporter en GPX</span>
         </button>
 
         <button @click="handleDeleteTrack" class="action-button delete-button">
           <span class="icon">🗑️</span>
-          <span class="label">Supprimer</span>
+          <span>Supprimer</span>
         </button>
       </div>
     </div>
 
-    <!-- Chargement -->
-    <div v-if="loading" class="loading-container">
+    <h2 v-if="track">{{ track.name || 'Trajet' }}</h2>
+
+    <div v-if="isLoading" class="loading-container">
       <div class="loading-spinner"></div>
-      <p>Chargement du trajet...</p>
+      <p>Chargement des données...</p>
     </div>
 
-    <!-- Erreur -->
     <div v-else-if="error" class="error-container">
       <p>{{ error }}</p>
-      <button @click="router.push({ name: 'tracks' })" class="retry-button">
-        Retour à la liste des trajets
-      </button>
+      <button @click="goBack" class="retry-button">Retour à la liste des trajets</button>
     </div>
 
-    <!-- Contenu du trajet -->
-    <template v-else-if="track">
-      <h2>{{ track.name }}</h2>
+    <div v-else-if="track" class="track-content">
+      <!-- Statistiques du trajet -->
+      <TrackStats :statistics="statistics" />
 
-      <!-- Informations générales -->
-      <div class="track-info-cards">
-        <div class="info-card">
-          <div class="info-icon">📅</div>
-          <div class="info-label">Date</div>
-          <div class="info-value">{{ formatDate(track.startTime) }}</div>
-        </div>
+      <!-- Visualisation du trajet -->
+      <TrackVisualizer v-if="track.points && track.points.length > 0" :track="track" />
 
-        <div class="info-card">
-          <div class="info-icon">⏱️</div>
-          <div class="info-label">Durée</div>
-          <div class="info-value">{{ formatDuration(track.duration) }}</div>
-        </div>
+      <div v-else class="no-data">Aucune donnée disponible pour ce trajet</div>
+    </div>
 
-        <div class="info-card">
-          <div class="info-icon">📏</div>
-          <div class="info-label">Distance</div>
-          <div class="info-value">{{ formatDistance(track.distance) }}</div>
-        </div>
-
-        <div class="info-card">
-          <div class="info-icon">⚡</div>
-          <div class="info-label">Vitesse moyenne</div>
-          <div class="info-value">{{ avgSpeed.toFixed(1) }} km/h</div>
-        </div>
-      </div>
-
-      <!-- Visualisation interactive du trajet -->
-      <div class="track-visualization">
-        <TrackVisualizer :track="track" :auto-play="false" />
-      </div>
-    </template>
+    <div v-else class="no-data">Aucun trajet trouvé</div>
   </div>
 </template>
 
 <style scoped>
-.track-detail-view {
+.track-detail {
   max-width: 1000px;
   margin: 0 auto;
   padding: 1rem;
@@ -212,49 +196,24 @@ h2 {
   text-align: center;
 }
 
-.track-info-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.info-card {
-  background-color: var(--card-background, #fff);
-  padding: 1rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+.track-content {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.info-icon {
-  font-size: 1.75rem;
-  margin-bottom: 0.5rem;
-}
-
-.info-label {
-  font-size: 0.9rem;
-  color: var(--text-secondary, #666);
-  margin-bottom: 0.25rem;
-}
-
-.info-value {
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: var(--text-color);
+  gap: 1.5rem;
 }
 
 .loading-container,
-.error-container {
+.error-container,
+.no-data {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 3rem 1rem;
   text-align: center;
+  background-color: var(--card-background);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 .loading-spinner {
@@ -292,10 +251,6 @@ h2 {
   background-color: var(--primary-color-dark, #388e3c);
 }
 
-.track-visualization {
-  margin-top: 2rem;
-}
-
 @media (max-width: 600px) {
   .header-actions {
     flex-direction: column;
@@ -309,10 +264,6 @@ h2 {
   .back-button,
   .action-button {
     justify-content: center;
-  }
-
-  .track-info-cards {
-    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

@@ -135,9 +135,10 @@ export function addPointToTrack(position) {
 
 /**
  * Arrêter le trajet actif
+ * @param {Object} extraData - Données supplémentaires à stocker dans le trajet
  * @returns {Object|null} - Le trajet arrêté ou null si aucun trajet actif
  */
-export function stopTrack() {
+export function stopTrack(extraData = null) {
   const currentTrack = getCurrentTrack()
   if (!currentTrack || !currentTrack.active) {
     return null
@@ -146,6 +147,11 @@ export function stopTrack() {
   // Marquer le trajet comme terminé
   currentTrack.active = false
   currentTrack.endTime = new Date().toISOString()
+
+  // Ajouter des données supplémentaires si fournies
+  if (extraData) {
+    Object.assign(currentTrack, extraData)
+  }
 
   // Enregistrer le trajet dans l'historique
   saveTrackToHistory(currentTrack)
@@ -320,6 +326,8 @@ export function calculateTrackStats(trackId) {
       maxSpeed: 0,
       elevationGain: 0,
       elevationLoss: 0,
+      speedHistory: [],
+      timeLabels: [],
     }
   }
 
@@ -359,6 +367,10 @@ export function calculateTrackStats(trackId) {
     }
   }
 
+  // Inclure les données de vitesse si disponibles
+  const speedHistory = track.speedData?.history || []
+  const timeLabels = track.speedData?.timeLabels || []
+
   return {
     distance: track.distance,
     duration: track.duration,
@@ -366,5 +378,7 @@ export function calculateTrackStats(trackId) {
     maxSpeed: maxSpeed,
     elevationGain: elevationGain,
     elevationLoss: elevationLoss,
+    speedHistory: speedHistory,
+    timeLabels: timeLabels,
   }
 }
