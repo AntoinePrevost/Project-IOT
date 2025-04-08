@@ -216,6 +216,7 @@ const formatTimestamp = (timestamp) => {
       minute: '2-digit',
       second: '2-digit',
     })
+  // eslint-disable-next-line no-unused-vars
   } catch (e) {
     return timestamp
   }

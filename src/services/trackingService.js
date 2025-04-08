@@ -86,18 +86,18 @@ export function addPointToTrack(position) {
       })
   }
 
-  // Créer le point
+  // Créer le point avec les coordonnées et infos de base
   const point = {
     latitude: position.latitude,
     longitude: position.longitude,
     accuracy: position.accuracy,
     altitude: position.altitude || null,
     timestamp: position.timestamp || new Date().toISOString(),
-    speed: position.speed || null,
+    speed: null, // On initialise à null, on calculera plus tard
     battery: batteryLevel,
   }
 
-  // Vérifier si le point est suffisamment éloigné du dernier point
+  // Calcul de la vitesse basée sur la distance et le temps écoulé depuis le dernier point
   if (currentTrack.points.length > 0) {
     const lastPoint = currentTrack.points[currentTrack.points.length - 1]
     const distance = calculateDistance(
@@ -114,19 +114,28 @@ export function addPointToTrack(position) {
 
     // Si trop proche ET temps écoulé trop court, on ignore ce point
     if (distance < MINIMUM_DISTANCE && timeDiff < 1000) {
-      console.log(
-        `Point ignoré: distance(${distance.toFixed(2)}m) < ${MINIMUM_DISTANCE}m et temps(${timeDiff}ms) < 1000ms`,
-      )
-      return currentTrack
+      console.log(`Point ignoré: distance(${distance.toFixed(2)}m) < ${MINIMUM_DISTANCE}m et temps(${timeDiff}ms) < 1000ms`);
+      return currentTrack;
+    }
+
+    // Calculer la vitesse en m/s basée sur la distance et le temps
+    if (timeDiff > 0) {
+      // Vitesse en m/s = distance (m) / temps (s)
+      const speedMps = distance / (timeDiff / 1000);
+      point.speed = speedMps;
+
+      console.log(`Vitesse calculée: ${speedMps.toFixed(2)} m/s (${(speedMps * 3.6).toFixed(2)} km/h) [distance: ${distance.toFixed(2)}m, temps: ${(timeDiff/1000).toFixed(2)}s]`);
+    } else {
+      console.log('Impossible de calculer la vitesse: pas de différence de temps');
+      point.speed = 0;
     }
 
     // Mettre à jour la distance totale
     currentTrack.distance += distance
-    console.log(
-      `Point ajouté: distance parcourue +${distance.toFixed(2)}m, total: ${currentTrack.distance.toFixed(2)}m`,
-    )
+    console.log(`Point ajouté: distance parcourue +${distance.toFixed(2)}m, total: ${currentTrack.distance.toFixed(2)}m`);
   } else {
-    console.log('Premier point du trajet ajouté')
+    console.log("Premier point du trajet ajouté - pas de vitesse calculable");
+    point.speed = 0; // Vitesse nulle pour le premier point
   }
 
   // Ajouter le point au trajet
@@ -178,7 +187,11 @@ export function stopTrack(extraData = null) {
 
   // S'assurer que tous les points ont des données de vitesse
   if (currentTrack.points && currentTrack.points.length > 0) {
-    console.log(`Traitement de ${currentTrack.points.length} points pour le calcul de vitesse`)
+    console.log(`Traitement de ${currentTrack.points.length} points pour vérification des vitesses`)
+
+    // Tableau pour conserver les vitesses en km/h pour le calcul de moyenne et max
+    const speedsKmh = [];
+    const timeLabels = [];
 
     currentTrack.points = currentTrack.points.map((point, index, points) => {
       // Si le point n'a pas de vitesse et qu'il y a un point précédent,
@@ -193,15 +206,53 @@ export function stopTrack(extraData = null) {
         )
 
         const timeDiff = new Date(point.timestamp) - new Date(prevPoint.timestamp)
-        const timeDiffHours = timeDiff / 1000 / 60 / 60 // en heures
+        const timeDiffSeconds = timeDiff / 1000
 
-        if (timeDiffHours > 0) {
-          // Vitesse en m/s (conversion en m/s plutôt que km/h)
-          point.speed = distance / 1000 / timeDiffHours / 3.6
+        if (timeDiffSeconds > 0) {
+          // Vitesse en m/s
+          point.speed = distance / timeDiffSeconds;
+          console.log(`Vitesse recalculée pour le point ${index}: ${point.speed.toFixed(2)} m/s (${(point.speed * 3.6).toFixed(2)} km/h)`);
         }
       }
-      return point
+
+      // Si le point a une vitesse valide, l'ajouter au tableau de vitesses
+      if (point.speed !== null && point.speed !== undefined && !isNaN(point.speed)) {
+        const speedKmh = point.speed * 3.6; // Conversion en km/h
+        speedsKmh.push(speedKmh);
+
+        // Créer label de temps formaté pour le graphique
+        const date = new Date(point.timestamp)
+        timeLabels.push(
+          date.toLocaleTimeString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })
+        );
+      }
+
+      return point;
     })
+
+    // Calculer la vitesse moyenne et maximale
+    if (speedsKmh.length > 0) {
+      const avgSpeed = speedsKmh.reduce((sum, speed) => sum + speed, 0) / speedsKmh.length;
+      const maxSpeed = Math.max(...speedsKmh);
+
+      // Créer les données de vitesse si elles n'existent pas déjà dans extraData
+      if (!currentTrack.speedData) {
+        currentTrack.speedData = {
+          history: speedsKmh,
+          timeLabels: timeLabels,
+          averageSpeed: avgSpeed.toFixed(1),
+          maxSpeed: maxSpeed.toFixed(1)
+        };
+
+        console.log(`SpeedData créé: ${speedsKmh.length} points, ` +
+                    `Vit. max: ${maxSpeed.toFixed(1)} km/h, ` +
+                    `Vit. moyenne: ${avgSpeed.toFixed(1)} km/h`);
+      }
+    }
   }
 
   // Enregistrer le trajet dans l'historique
@@ -397,7 +448,7 @@ export function calculateTrackStats(trackId) {
 
   // Extraire les données de vitesse des points
   track.points.forEach((point, index) => {
-    if (point.speed !== null && point.speed !== undefined) {
+    if (point.speed !== null && point.speed !== undefined && !isNaN(point.speed)) {
       const speedKmh = point.speed * 3.6 // Convertir en km/h
       speeds.push(speedKmh)
       maxSpeed = Math.max(maxSpeed, speedKmh)
@@ -417,7 +468,7 @@ export function calculateTrackStats(trackId) {
     }
   })
 
-  console.log(`Points avec vitesse: ${speeds.length} sur ${track.points.length}`)
+  console.log(`Points avec vitesse valide: ${speeds.length} sur ${track.points.length}`)
 
   // Utiliser les données speedData si elles existent, sinon utiliser celles calculées
   const finalSpeedHistory = track.speedData?.history || speedHistory
@@ -426,10 +477,15 @@ export function calculateTrackStats(trackId) {
 
   console.log(`Historique final: ${finalSpeedHistory.length} points`)
 
-  const averageSpeed =
-    speeds.length > 0
-      ? speeds.reduce((a, b) => a + b, 0) / speeds.length
-      : track.distance / 1000 / (track.duration / 3600)
+  // Calculer la vitesse moyenne
+  let averageSpeed = 0;
+  if (speeds.length > 0) {
+    // Moyenne des vitesses instantanées
+    averageSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
+  } else if (track.distance > 0 && track.duration > 0) {
+    // Vitesse moyenne basée sur la distance totale et la durée
+    averageSpeed = track.distance / 1000 / (track.duration / 3600);
+  }
 
   // Calculer l'élévation (dénivelé)
   let elevationGain = 0

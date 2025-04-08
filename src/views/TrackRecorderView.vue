@@ -215,7 +215,10 @@ function handlePositionUpdate(position) {
     const longitude = parseFloat(position.coords.longitude)
     const accuracy = parseFloat(position.coords.accuracy) || 5
     const altitude = position.coords.altitude !== null ? parseFloat(position.coords.altitude) : null
-    const speed = position.coords.speed !== null ? position.coords.speed : 0
+
+    // La vitesse fournie par le navigateur peut être null ou imprécise
+    // Nous la calculons nous-mêmes dans le service de tracking
+    const speed = null
 
     if (isNaN(latitude) || isNaN(longitude)) {
       errorMsg.value = 'Coordonnées GPS invalides'
@@ -243,19 +246,12 @@ function handlePositionUpdate(position) {
       // Mettre à jour la dernière position connue
       lastKnownPosition.value = { ...currentPosition.value }
 
-      // Mettre à jour la vitesse actuelle (km/h)
-      currentSpeed.value = speed * 3.6
-
-      // Mettre à jour la vitesse maximale
-      if (currentSpeed.value > maxSpeed.value) {
-        maxSpeed.value = currentSpeed.value
-      }
-
       // Ajouter le point au trajet si l'enregistrement est actif
       if (isRecording.value && !isPaused.value) {
         // Garder une trace du nombre de points avant l'ajout
         const pointsCountBefore = currentTrack.value?.points?.length || 0
 
+        // Ajouter le point - la vitesse sera calculée dans le service
         currentTrack.value = addPointToTrack(currentPosition.value)
 
         // Vérifier si le point a réellement été ajouté
@@ -263,6 +259,18 @@ function handlePositionUpdate(position) {
         const pointAdded = pointsCountAfter > pointsCountBefore
 
         if (pointAdded) {
+          // Le point a été ajouté, on peut récupérer la vitesse calculée
+          const lastPoint = currentTrack.value.points[currentTrack.value.points.length - 1]
+          if (lastPoint && lastPoint.speed !== null && lastPoint.speed !== undefined) {
+            // Mettre à jour la vitesse actuelle (km/h) à partir de celle calculée
+            currentSpeed.value = lastPoint.speed * 3.6
+
+            // Mettre à jour la vitesse maximale
+            if (currentSpeed.value > maxSpeed.value) {
+              maxSpeed.value = currentSpeed.value
+            }
+          }
+
           console.log(
             `Point ajouté: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}, vitesse: ${currentSpeed.value.toFixed(2)} km/h`,
           )
@@ -328,7 +336,7 @@ function handlePositionUpdate(position) {
           // Log pour débogage
           if (speedHistory.value.length % 10 === 0) {
             console.log(
-              `Historique de vitesse: ${speedHistory.value.length} points, dernier point: ${currentSpeed.value} km/h`,
+              `Historique de vitesse: ${speedHistory.value.length} points, dernier point: ${currentSpeed.value} km/h, moyenne: ${averageSpeed.value.toFixed(1)} km/h`,
             )
           }
         }

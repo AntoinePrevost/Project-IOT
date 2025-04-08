@@ -55,7 +55,9 @@ function getLocation() {
           parseFloat(position.coords.altitude) !== null
             ? parseFloat(position.coords.altitude)
             : null
-        const speed = position.coords.speed !== null ? position.coords.speed : null
+        // Ne pas utiliser la vitesse du navigateur, elle est souvent imprécise
+        // Nous la calculerons nous-mêmes si nécessaire
+        const speed = null
 
         if (!isNaN(latitude) && !isNaN(longitude)) {
           location.value = {
@@ -164,9 +166,13 @@ function startWatchPosition() {
         const accuracy = parseFloat(position.coords.accuracy) || 1
         const altitude =
           position.coords.altitude !== null ? parseFloat(position.coords.altitude) : null
-        const speed = position.coords.speed !== null ? position.coords.speed : null
+        // Ne pas utiliser la vitesse du navigateur, nous la calculerons nous-mêmes
+        const speed = null
 
         if (!isNaN(latitude) && !isNaN(longitude)) {
+          // Conserver l'ancienne position pour calculer la vitesse
+          const oldLocation = location.value
+
           location.value = {
             latitude,
             longitude,
@@ -174,6 +180,25 @@ function startWatchPosition() {
             altitude,
             speed,
             timestamp: new Date().toISOString(),
+          }
+
+          // Calculer la vitesse si nous avons une position précédente
+          if (oldLocation && oldLocation.latitude && oldLocation.longitude) {
+            // Utiliser la formule Haversine pour calculer la distance
+            const distance = calculateDistance(
+              oldLocation.latitude,
+              oldLocation.longitude,
+              latitude,
+              longitude,
+            )
+
+            const timeDiff = new Date(location.value.timestamp) - new Date(oldLocation.timestamp)
+            if (timeDiff > 0) {
+              // Calculer la vitesse en m/s
+              const speedMps = distance / (timeDiff / 1000)
+              // Convertir en km/h pour l'affichage
+              location.value.calculatedSpeed = speedMps * 3.6
+            }
           }
 
           // Auto send if enabled
@@ -209,6 +234,22 @@ function startWatchPosition() {
   )
 
   isWatching.value = true
+}
+
+// Fonction auxiliaire pour calculer la distance entre deux points
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3 // Rayon de la Terre en mètres
+  const φ1 = (lat1 * Math.PI) / 180
+  const φ2 = (lat2 * Math.PI) / 180
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return R * c // Distance en mètres
 }
 
 function stopWatchPosition() {
