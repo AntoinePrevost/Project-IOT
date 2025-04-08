@@ -247,8 +247,25 @@ export function stopTrack(extraData = null) {
       const avgSpeed = speedsKmh.reduce((sum, speed) => sum + speed, 0) / speedsKmh.length
       const maxSpeed = Math.max(...speedsKmh)
 
-      // Si des speedData n'ont pas été fournies dans extraData, les créer maintenant
-      if (!currentTrack.speedData && (!extraData || !extraData.speedData)) {
+      // Utiliser les données speedData de extraData si disponibles, sinon créer
+      if (extraData && extraData.speedData) {
+        // Si nous avons reçu speedData de l'extérieur (TrackRecorderView)
+        // mais qu'ils sont incomplets, fusionner avec les données calculées ici
+        if (extraData.speedData.history.length < speedsKmh.length) {
+          console.log(
+            `Fusion des données de vitesse: ${extraData.speedData.history.length} (existantes) + ${speedsKmh.length} (calculées)`,
+          )
+
+          // Privilégier les données calculées ici si elles sont plus nombreuses
+          currentTrack.speedData = {
+            history: speedsKmh,
+            timeLabels: timeLabels,
+            averageSpeed: avgSpeed.toFixed(1),
+            maxSpeed: maxSpeed.toFixed(1),
+          }
+        }
+      } else {
+        // Sinon créer de nouvelles données de vitesse
         currentTrack.speedData = {
           history: speedsKmh,
           timeLabels: timeLabels,

@@ -97,6 +97,43 @@ export function prepareTrackData(track) {
     if (pointsWithoutSpeed > 0) {
       console.log(`${pointsWithoutSpeed} points sans vitesse ont été recalculés`)
     }
+
+    // Si aucune donnée speedData n'existe, les créer à partir des points
+    if (!preparedTrack.speedData && preparedTrack.points.length > 0) {
+      const speedsKmh = []
+      const timeLabels = []
+
+      preparedTrack.points.forEach((point) => {
+        if (point.speed !== null && point.speed !== undefined) {
+          const speedKmh = point.speed * 3.6 // Convertir en km/h
+          speedsKmh.push(speedKmh)
+
+          // Créer label de temps
+          const date = new Date(point.timestamp)
+          timeLabels.push(
+            date.toLocaleTimeString('fr-FR', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            }),
+          )
+        }
+      })
+
+      if (speedsKmh.length > 0) {
+        const avgSpeed = speedsKmh.reduce((sum, speed) => sum + speed, 0) / speedsKmh.length
+        const maxSpeed = Math.max(...speedsKmh)
+
+        preparedTrack.speedData = {
+          history: speedsKmh,
+          timeLabels: timeLabels,
+          averageSpeed: avgSpeed.toFixed(1),
+          maxSpeed: maxSpeed.toFixed(1),
+        }
+
+        console.log(`SpeedData créé lors de la préparation: ${speedsKmh.length} points`)
+      }
+    }
   }
 
   return preparedTrack

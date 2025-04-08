@@ -144,19 +144,86 @@ function stopRecording() {
 
   // Enregistrer les données de vitesse dans le track
   if (currentTrack.value) {
-    // S'assurer que currentTrack est mis à jour avec l'historique complet - tous les points sont inclus
-    // Pas seulement ceux affichés sur le graphique
+    // S'assurer que chaque point de l'historique speedHistory est associé à tous les points du trajet
+    // Afin d'avoir un enregistrement complet des vitesses
+
+    // Vérifier et compléter l'historique de vitesse si nécessaire
+    if (speedHistory.value.length < currentTrack.value.points.length) {
+      console.log(
+        `Historique de vitesse incomplet: ${speedHistory.value.length} vs ${currentTrack.value.points.length} points`,
+      )
+
+      // Pour chaque point du trajet, s'assurer qu'il existe une entrée correspondante dans l'historique
+      currentTrack.value.points.forEach((point, index) => {
+        if (index >= speedHistory.value.length) {
+          // Calculer la vitesse pour ce point si possible
+          if (index > 0) {
+            const prevPoint = currentTrack.value.points[index - 1]
+            if (prevPoint && point.timestamp && prevPoint.timestamp) {
+              const timeDiff = (new Date(point.timestamp) - new Date(prevPoint.timestamp)) / 1000 // en secondes
+
+              if (timeDiff > 0) {
+                const distance = calculateDistance(
+                  prevPoint.latitude,
+                  prevPoint.longitude,
+                  point.latitude,
+                  point.longitude,
+                )
+
+                const speedMps = distance / timeDiff
+                const speedKmh = speedMps * 3.6
+
+                // Ajouter à l'historique
+                speedHistory.value.push(speedKmh)
+
+                // Ajouter le label de temps
+                const date = new Date(point.timestamp)
+                timeLabels.value.push(
+                  date.toLocaleTimeString('fr-FR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  }),
+                )
+
+                console.log(`Vitesse calculée pour point ${index}: ${speedKmh.toFixed(2)} km/h`)
+              }
+            }
+          } else {
+            // Pour le premier point, utiliser 0 comme vitesse
+            speedHistory.value.push(0)
+            timeLabels.value.push(
+              new Date(point.timestamp).toLocaleTimeString('fr-FR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              }),
+            )
+          }
+        }
+      })
+
+      // Recalculer la vitesse moyenne
+      if (speedHistory.value.length > 0) {
+        const sum = speedHistory.value.reduce((a, b) => a + b, 0)
+        averageSpeed.value = sum / speedHistory.value.length
+      }
+
+      console.log(`Historique complété: ${speedHistory.value.length} points`)
+    }
+
+    // S'assurer que currentTrack est mis à jour avec l'historique complet
     const speedData = {
       history: [...speedHistory.value],
       timeLabels: [...timeLabels.value],
-      maxSpeed: maxSpeed.value,
-      averageSpeed: averageSpeed.value,
+      maxSpeed: maxSpeed.value.toFixed(1),
+      averageSpeed: averageSpeed.value.toFixed(1),
     }
 
     console.log(`Sauvegarde de ${speedHistory.value.length} points de vitesse`)
 
     // Finaliser le trajet en passant les données de vitesse
-    const finishedTrack = stopTrack({ speedData, allPoints: true })
+    const finishedTrack = stopTrack({ speedData })
     isRecording.value = false
     isPaused.value = false
 
@@ -176,6 +243,22 @@ function stopRecording() {
     isPaused.value = false
     router.push({ name: 'tracks' })
   }
+}
+
+// Calculer la distance entre deux points
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3 // Rayon de la Terre en mètres
+  const φ1 = (lat1 * Math.PI) / 180
+  const φ2 = (lat2 * Math.PI) / 180
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return R * c // Distance en mètres
 }
 
 // Démarrer le suivi de position
@@ -290,6 +373,13 @@ function handlePositionUpdate(position) {
             }),
           )
           speedHistory.value.push(currentSpeed.value)
+
+          // Log pour s'assurer que l'historique se remplit correctement
+          if (speedHistory.value.length % 5 === 0 || speedHistory.value.length <= 5) {
+            console.log(
+              `État de l'historique de vitesse: ${speedHistory.value.length} points (dernier: ${currentSpeed.value.toFixed(1)} km/h)`,
+            )
+          }
 
           // Si nous voulons limiter la taille de l'historique AFFICHÉ sur le graphique, mais
           // conserver toutes les données
