@@ -46,7 +46,7 @@ export function prepareTrackData(track) {
   if (!track) return null
 
   // Créer une copie du trajet pour éviter de modifier l'original
-  const preparedTrack = { ...track }
+  const preparedTrack = JSON.parse(JSON.stringify(track))
 
   // Vérifier et corriger la durée si nécessaire
   if (preparedTrack.duration === 0 && preparedTrack.points && preparedTrack.points.length >= 2) {
@@ -63,18 +63,19 @@ export function prepareTrackData(track) {
     }
   }
 
-  // Vérifier et recalculer les vitesses manquantes
-  if (preparedTrack.points && preparedTrack.points.length > 1) {
-    let pointsWithoutSpeed = 0
+  // Vérifier et recalculer TOUTES les vitesses pour uniformité
+  if (preparedTrack.points && preparedTrack.points.length > 0) {
+    console.log(
+      `Préparation du trajet: recalcul de toutes les vitesses pour ${preparedTrack.points.length} points`,
+    )
 
-    preparedTrack.points = preparedTrack.points.map((point, index, points) => {
-      // Si le point n'a pas de vitesse et qu'il y a un point précédent,
-      // calculer la vitesse approximative
-      if ((point.speed === null || point.speed === undefined || point.speed === 0) && index > 0) {
-        pointsWithoutSpeed++
+    // Recalculer les vitesses pour tous les points
+    for (let i = 0; i < preparedTrack.points.length; i++) {
+      if (i > 0) {
+        const point = preparedTrack.points[i]
+        const prevPoint = preparedTrack.points[i - 1]
 
-        const prevPoint = points[index - 1]
-        // Utiliser une fonction de calcul de distance existante ou l'implémenter ici
+        // Calculer la distance
         const distance = calculateDistance(
           prevPoint.latitude,
           prevPoint.longitude,
@@ -82,57 +83,59 @@ export function prepareTrackData(track) {
           point.longitude,
         )
 
-        const timeDiff = new Date(point.timestamp) - new Date(prevPoint.timestamp)
-        const timeDiffSeconds = timeDiff / 1000
+        const timeDiff = (new Date(point.timestamp) - new Date(prevPoint.timestamp)) / 1000
 
-        if (timeDiffSeconds > 0) {
-          // Vitesse en m/s
-          point.speed = distance / timeDiffSeconds
+        if (timeDiff > 0) {
+          // Calculer la vitesse en m/s
+          const speedMps = distance / timeDiff
+          preparedTrack.points[i].speed = speedMps
+        } else {
+          // Si le temps est négatif ou nul, mettre la vitesse à 0
+          preparedTrack.points[i].speed = 0
         }
+      } else {
+        // Premier point: vitesse = 0
+        preparedTrack.points[0].speed = 0
       }
-
-      return point
-    })
-
-    if (pointsWithoutSpeed > 0) {
-      console.log(`${pointsWithoutSpeed} points sans vitesse ont été recalculés`)
     }
 
-    // Si aucune donnée speedData n'existe, les créer à partir des points
-    if (!preparedTrack.speedData && preparedTrack.points.length > 0) {
-      const speedsKmh = []
-      const timeLabels = []
+    // Recréer complètement les speedData à partir des points
+    const speedsKmh = []
+    const timeLabels = []
 
-      preparedTrack.points.forEach((point) => {
-        if (point.speed !== null && point.speed !== undefined) {
-          const speedKmh = point.speed * 3.6 // Convertir en km/h
-          speedsKmh.push(speedKmh)
+    preparedTrack.points.forEach((point) => {
+      // Convertir de m/s à km/h
+      const speedKmh = point.speed * 3.6
+      speedsKmh.push(speedKmh)
 
-          // Créer label de temps
-          const date = new Date(point.timestamp)
-          timeLabels.push(
-            date.toLocaleTimeString('fr-FR', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            }),
-          )
-        }
-      })
+      // Créer label de temps
+      const date = new Date(point.timestamp)
+      timeLabels.push(
+        date.toLocaleTimeString('fr-FR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      )
+    })
 
-      if (speedsKmh.length > 0) {
-        const avgSpeed = speedsKmh.reduce((sum, speed) => sum + speed, 0) / speedsKmh.length
-        const maxSpeed = Math.max(...speedsKmh)
+    if (speedsKmh.length > 0) {
+      const avgSpeed = speedsKmh.reduce((sum, speed) => sum + speed, 0) / speedsKmh.length
+      const maxSpeed = Math.max(...speedsKmh)
 
-        preparedTrack.speedData = {
-          history: speedsKmh,
-          timeLabels: timeLabels,
-          averageSpeed: avgSpeed.toFixed(1),
-          maxSpeed: maxSpeed.toFixed(1),
-        }
-
-        console.log(`SpeedData créé lors de la préparation: ${speedsKmh.length} points`)
+      // Toujours recréer les speedData pour être sûr
+      preparedTrack.speedData = {
+        history: speedsKmh,
+        timeLabels: timeLabels,
+        averageSpeed: avgSpeed.toFixed(1),
+        maxSpeed: maxSpeed.toFixed(1),
       }
+
+      console.log(
+        `SpeedData recréées: ${speedsKmh.length} points, ` +
+          `vitesse max: ${maxSpeed.toFixed(1)} km/h, ` +
+          `vitesse moyenne: ${avgSpeed.toFixed(1)} km/h`,
+      )
     }
   }
 
@@ -183,13 +186,18 @@ export function calculateTrackStatistics(track) {
     // Si on a des données de vitesse instantanée, on les utilise
     avgSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
     maxSpeed = Math.max(...speeds)
+    console.log(`Statistiques calculées: ${speeds.length} points de vitesse utilisés`)
   } else if (durationSec > 0) {
-    // Sinon, calcul basé sur distance et durée
+    // Sinon, calcul basé sur distance et durée totale
     avgSpeed = distanceKm / (durationSec / 3600)
+    console.log(
+      `Statistiques basées uniquement sur distance totale et durée (pas de points de vitesse)`,
+    )
   }
 
-  // Utiliser les données de speedData si elles existent
-  if (track.speedData) {
+  // Utiliser les données de speedData si elles existent et semblent valides
+  if (track.speedData && track.speedData.history && track.speedData.history.length > 0) {
+    console.log(`Utilisation des speedData existantes: ${track.speedData.history.length} points`)
     if (track.speedData.averageSpeed !== undefined) {
       avgSpeed = parseFloat(track.speedData.averageSpeed)
     }
@@ -226,8 +234,8 @@ export function calculateTrackStatistics(track) {
     duration: formattedDuration,
     avgSpeed: avgSpeed.toFixed(1),
     maxSpeed: maxSpeed.toFixed(1),
-    elevGain: Math.round(elevGain),
-    elevLoss: Math.round(elevLoss),
+    elevGain: Math.round(elevGain || 0),
+    elevLoss: Math.round(elevLoss || 0),
   }
 }
 

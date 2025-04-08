@@ -299,9 +299,9 @@ function handlePositionUpdate(position) {
     const accuracy = parseFloat(position.coords.accuracy) || 5
     const altitude = position.coords.altitude !== null ? parseFloat(position.coords.altitude) : null
 
-    // La vitesse fournie par le navigateur peut être null ou imprécise
-    // Nous la calculons nous-mêmes dans le service de tracking
-    const speed = null
+    // Ne JAMAIS utiliser la vitesse du navigateur, même si disponible
+    // Toujours à null pour forcer le calcul basé sur les positions
+    const speed = null;
 
     if (isNaN(latitude) || isNaN(longitude)) {
       errorMsg.value = 'Coordonnées GPS invalides'
@@ -317,13 +317,15 @@ function handlePositionUpdate(position) {
 
     // Si c'est une nouvelle position ou si la position a changé, on l'enregistre
     if (isNewPosition) {
+      // Créer le nouveau point avec timestamp précis
+      const now = new Date()
       currentPosition.value = {
         latitude,
         longitude,
         accuracy,
         altitude,
-        speed,
-        timestamp: new Date().toISOString(),
+        speed: null, // Toujours null pour être recalculé par le service
+        timestamp: now.toISOString(),
       }
 
       // Mettre à jour la dernière position connue
@@ -342,43 +344,38 @@ function handlePositionUpdate(position) {
         const pointAdded = pointsCountAfter > pointsCountBefore
 
         if (pointAdded) {
-          // Le point a été ajouté, on peut récupérer la vitesse calculée
+          // Le point a été ajouté, récupérer la vitesse calculée par le service de tracking
           const lastPoint = currentTrack.value.points[currentTrack.value.points.length - 1]
+
+          // Si la vitesse a été calculée dans le service
           if (lastPoint && lastPoint.speed !== null && lastPoint.speed !== undefined) {
-            // Mettre à jour la vitesse actuelle (km/h) à partir de celle calculée
+            // Convertir m/s en km/h pour l'affichage
             currentSpeed.value = lastPoint.speed * 3.6
 
             // Mettre à jour la vitesse maximale
             if (currentSpeed.value > maxSpeed.value) {
               maxSpeed.value = currentSpeed.value
             }
-          }
 
-          console.log(
-            `Point ajouté: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}, vitesse: ${currentSpeed.value.toFixed(2)} km/h`,
-          )
+            // Ajouter à l'historique de vitesse pour le graphique
+            const currentTime = now
+            timeLabels.value.push(
+              currentTime.toLocaleTimeString('fr-FR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })
+            )
+            speedHistory.value.push(currentSpeed.value)
+
+            console.log(`Point ajouté #${pointsCountAfter}: position (${latitude.toFixed(6)}, ${longitude.toFixed(6)}), vitesse calculée: ${currentSpeed.value.toFixed(2)} km/h`)
+          } else {
+            console.warn("Point ajouté mais sans vitesse calculée!")
+          }
 
           // Mettre à jour la distance
           if (currentTrack.value) {
             distance.value = currentTrack.value.distance / 1000
-          }
-
-          // Ajouter à l'historique de vitesse pour le graphique
-          const currentTime = new Date()
-          timeLabels.value.push(
-            currentTime.toLocaleTimeString('fr-FR', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            }),
-          )
-          speedHistory.value.push(currentSpeed.value)
-
-          // Log pour s'assurer que l'historique se remplit correctement
-          if (speedHistory.value.length % 5 === 0 || speedHistory.value.length <= 5) {
-            console.log(
-              `État de l'historique de vitesse: ${speedHistory.value.length} points (dernier: ${currentSpeed.value.toFixed(1)} km/h)`,
-            )
           }
 
           // Si nous voulons limiter la taille de l'historique AFFICHÉ sur le graphique, mais
@@ -424,13 +421,17 @@ function handlePositionUpdate(position) {
           }
 
           // Log pour débogage
-          if (speedHistory.value.length % 10 === 0) {
+          if (speedHistory.value.length % 10 === 0 || speedHistory.value.length <= 5) {
             console.log(
-              `Historique de vitesse: ${speedHistory.value.length} points, dernier point: ${currentSpeed.value} km/h, moyenne: ${averageSpeed.value.toFixed(1)} km/h`,
+              `Historique de vitesse mis à jour: ${speedHistory.value.length} points, dernier point: ${currentSpeed.value.toFixed(2)} km/h, moyenne: ${averageSpeed.value.toFixed(1)} km/h`
             )
           }
+        } else {
+          console.log(`Position ignorée car trop proche ou timestamp trop proche (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`)
         }
       }
+    } else {
+      console.log(`Position identique à la précédente, ignorée: (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`)
     }
   } catch (error) {
     console.error('Erreur de traitement des données GPS:', error)
