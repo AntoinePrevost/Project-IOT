@@ -9,19 +9,18 @@ import { ref, computed } from 'vue'
  * @param {number} lon2 - Longitude du deuxième point
  * @returns {number} - Distance en mètres
  */
-export function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371000 // Rayon de la Terre en mètres
-  const dLat = ((lat2 - lat1) * Math.PI) / 180
-  const dLon = ((lon2 - lon1) * Math.PI) / 180
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3 // Rayon de la Terre en mètres
+  const φ1 = (lat1 * Math.PI) / 180
+  const φ2 = (lat2 * Math.PI) / 180
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180
 
   const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2)
-
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
   return R * c // Distance en mètres
 }
 
@@ -39,68 +38,80 @@ export function formatDuration(seconds) {
 }
 
 /**
- * Nettoie et prépare les données d'un trajet
- * @param {Object} track - Les données du trajet à nettoyer
- * @returns {Object} - Les données nettoyées
+ * Prépare les données d'un trajet pour l'affichage et l'analyse
+ * @param {Object} track - Le trajet à préparer
+ * @returns {Object} - Le trajet préparé
  */
 export function prepareTrackData(track) {
-  if (!track || !track.points || track.points.length === 0) {
-    return track
-  }
+  if (!track) return null
 
-  // Clone l'objet pour éviter de modifier l'original
-  const cleanedTrack = JSON.parse(JSON.stringify(track))
+  // Créer une copie du trajet pour éviter de modifier l'original
+  const preparedTrack = { ...track }
 
-  // S'assurer que les points sont triés par timestamp
-  cleanedTrack.points.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+  // Vérifier et corriger la durée si nécessaire
+  if (preparedTrack.duration === 0 && preparedTrack.points && preparedTrack.points.length >= 2) {
+    const firstPoint = preparedTrack.points[0]
+    const lastPoint = preparedTrack.points[preparedTrack.points.length - 1]
 
-  // Filtrer les points invalides
-  cleanedTrack.points = cleanedTrack.points.filter(
-    (point) =>
-      point.latitude !== undefined &&
-      point.longitude !== undefined &&
-      !isNaN(point.latitude) &&
-      !isNaN(point.longitude),
-  )
+    if (firstPoint.timestamp && lastPoint.timestamp) {
+      const startTime = new Date(firstPoint.timestamp)
+      const endTime = new Date(lastPoint.timestamp)
+      const calculatedDuration = (endTime - startTime) / 1000
 
-  // Calculer la vitesse pour chaque point si elle n'est pas présente
-  for (let i = 1; i < cleanedTrack.points.length; i++) {
-    const prevPoint = cleanedTrack.points[i - 1]
-    const currentPoint = cleanedTrack.points[i]
-
-    if (!currentPoint.speed || currentPoint.speed === 0) {
-      const distance = calculateDistance(
-        prevPoint.latitude,
-        prevPoint.longitude,
-        currentPoint.latitude,
-        currentPoint.longitude,
-      )
-
-      const timeDiffMs = new Date(currentPoint.timestamp) - new Date(prevPoint.timestamp)
-      const timeDiffHours = timeDiffMs / (1000 * 60 * 60)
-
-      // Vitesse en km/h
-      if (timeDiffHours > 0) {
-        currentPoint.speed = distance / 1000 / timeDiffHours
-      } else {
-        currentPoint.speed = 0
-      }
+      console.log(`Durée corrigée: ${calculatedDuration}s (était: 0s)`)
+      preparedTrack.duration = calculatedDuration
     }
   }
 
-  return cleanedTrack
+  // Vérifier et recalculer les vitesses manquantes
+  if (preparedTrack.points && preparedTrack.points.length > 1) {
+    let pointsWithoutSpeed = 0
+
+    preparedTrack.points = preparedTrack.points.map((point, index, points) => {
+      // Si le point n'a pas de vitesse et qu'il y a un point précédent,
+      // calculer la vitesse approximative
+      if ((point.speed === null || point.speed === undefined || point.speed === 0) && index > 0) {
+        pointsWithoutSpeed++
+
+        const prevPoint = points[index - 1]
+        // Utiliser une fonction de calcul de distance existante ou l'implémenter ici
+        const distance = calculateDistance(
+          prevPoint.latitude,
+          prevPoint.longitude,
+          point.latitude,
+          point.longitude,
+        )
+
+        const timeDiff = new Date(point.timestamp) - new Date(prevPoint.timestamp)
+        const timeDiffSeconds = timeDiff / 1000
+
+        if (timeDiffSeconds > 0) {
+          // Vitesse en m/s
+          point.speed = distance / timeDiffSeconds
+        }
+      }
+
+      return point
+    })
+
+    if (pointsWithoutSpeed > 0) {
+      console.log(`${pointsWithoutSpeed} points sans vitesse ont été recalculés`)
+    }
+  }
+
+  return preparedTrack
 }
 
 /**
- * Calcule les statistiques d'un trajet
- * @param {Object} track - Les données du trajet
+ * Calcule les statistiques d'un trajet pour l'affichage
+ * @param {Object} track - Le trajet pour lequel calculer les statistiques
  * @returns {Object} - Les statistiques calculées
  */
 export function calculateTrackStatistics(track) {
-  if (!track || !track.points || track.points.length === 0) {
+  if (!track || !track.points || track.points.length < 2) {
     return {
       distance: 0,
-      duration: 0,
+      duration: '00:00:00',
       avgSpeed: 0,
       maxSpeed: 0,
       elevGain: 0,
@@ -108,65 +119,78 @@ export function calculateTrackStatistics(track) {
     }
   }
 
-  // Traitement des statistiques de base
-  const startTime = new Date(track.points[0].timestamp)
-  const endTime = new Date(track.points[track.points.length - 1].timestamp)
-  const durationMs = endTime - startTime
-  const durationMinutes = durationMs / (1000 * 60)
+  // Extraire et formater la durée
+  const durationSec = track.duration || 0
+  const hours = Math.floor(durationSec / 3600)
+  const minutes = Math.floor((durationSec % 3600) / 60)
+  const seconds = Math.floor(durationSec % 60)
+  const formattedDuration = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 
-  // Vérifier que les points ont des coordonnées valides avant calcul
-  const validPoints = track.points.filter(
-    (p) => typeof p.latitude === 'number' && typeof p.longitude === 'number',
-  )
+  // Calculer la distance en kilomètres
+  const distanceKm = track.distance / 1000
 
-  // Calcul de la distance totale
-  let totalDistance = 0
+  // Extraire les données de vitesse
+  const speeds = []
+  track.points.forEach((point) => {
+    if (point.speed !== null && point.speed !== undefined && !isNaN(point.speed)) {
+      const speedKmh = point.speed * 3.6 // m/s vers km/h
+      speeds.push(speedKmh)
+    }
+  })
+
+  // Calculer vitesse moyenne et maximale
+  let avgSpeed = 0
   let maxSpeed = 0
+
+  if (speeds.length > 0) {
+    // Si on a des données de vitesse instantanée, on les utilise
+    avgSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
+    maxSpeed = Math.max(...speeds)
+  } else if (durationSec > 0) {
+    // Sinon, calcul basé sur distance et durée
+    avgSpeed = distanceKm / (durationSec / 3600)
+  }
+
+  // Utiliser les données de speedData si elles existent
+  if (track.speedData) {
+    if (track.speedData.averageSpeed !== undefined) {
+      avgSpeed = parseFloat(track.speedData.averageSpeed)
+    }
+    if (track.speedData.maxSpeed !== undefined) {
+      maxSpeed = parseFloat(track.speedData.maxSpeed)
+    }
+  }
+
+  // Calculer l'élévation (dénivelé)
   let elevGain = 0
   let elevLoss = 0
-  let lastElevation = null
 
-  for (let i = 1; i < validPoints.length; i++) {
-    const prevPoint = validPoints[i - 1]
-    const currentPoint = validPoints[i]
+  for (let i = 1; i < track.points.length; i++) {
+    const current = track.points[i]
+    const previous = track.points[i - 1]
 
-    // Calcul de la distance entre 2 points
-    totalDistance += calculateDistance(
-      prevPoint.latitude,
-      prevPoint.longitude,
-      currentPoint.latitude,
-      currentPoint.longitude,
-    )
-
-    // Mise à jour de la vitesse max (si disponible)
-    if (currentPoint.speed && currentPoint.speed > maxSpeed) {
-      maxSpeed = currentPoint.speed
-    }
-
-    // Calcul du dénivelé (si l'altitude est disponible)
-    if (prevPoint.altitude !== undefined && currentPoint.altitude !== undefined) {
-      const elevDiff = currentPoint.altitude - prevPoint.altitude
-      if (elevDiff > 0) {
-        elevGain += elevDiff
-      } else {
-        elevLoss += Math.abs(elevDiff)
+    if (
+      current.altitude !== null &&
+      previous.altitude !== null &&
+      current.altitude !== undefined &&
+      previous.altitude !== undefined
+    ) {
+      const diff = current.altitude - previous.altitude
+      if (diff > 0) {
+        elevGain += diff
+      } else if (diff < 0) {
+        elevLoss += Math.abs(diff)
       }
     }
   }
 
-  // Convertir en km
-  totalDistance = totalDistance / 1000
-
-  // Calculer la vitesse moyenne (km/h)
-  const avgSpeed = durationMinutes > 0 ? (totalDistance / durationMinutes) * 60 : 0
-
   return {
-    distance: totalDistance.toFixed(2),
-    duration: formatDuration(durationMs / 1000),
+    distance: distanceKm.toFixed(2),
+    duration: formattedDuration,
     avgSpeed: avgSpeed.toFixed(1),
     maxSpeed: maxSpeed.toFixed(1),
-    elevGain: elevGain.toFixed(0),
-    elevLoss: elevLoss.toFixed(0),
+    elevGain: Math.round(elevGain),
+    elevLoss: Math.round(elevLoss),
   }
 }
 

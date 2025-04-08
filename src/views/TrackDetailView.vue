@@ -53,6 +53,52 @@ const statistics = computed(() => {
     }
   }
 
+  // Vérifier également les vitesses avant de calculer les statistiques
+  if (track.value.points && track.value.points.length > 1) {
+    let pointsWithoutSpeed = 0
+
+    // Recalculer les vitesses manquantes
+    track.value.points.forEach((point, index) => {
+      if ((point.speed === null || point.speed === undefined || point.speed === 0) && index > 0) {
+        pointsWithoutSpeed++
+
+        const prevPoint = track.value.points[index - 1]
+        if (prevPoint) {
+          // Calculer la distance entre les points
+          const lat1 = prevPoint.latitude
+          const lon1 = prevPoint.longitude
+          const lat2 = point.latitude
+          const lon2 = point.longitude
+
+          const R = 6371e3 // Rayon de la Terre en mètres
+          const φ1 = (lat1 * Math.PI) / 180
+          const φ2 = (lat2 * Math.PI) / 180
+          const Δφ = ((lat2 - lat1) * Math.PI) / 180
+          const Δλ = ((lon2 - lon1) * Math.PI) / 180
+
+          const a =
+            Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+          const distance = R * c // Distance en mètres
+
+          const timeDiff = new Date(point.timestamp) - new Date(prevPoint.timestamp)
+          if (timeDiff > 0) {
+            // Calculer la vitesse en m/s
+            point.speed = distance / (timeDiff / 1000)
+            console.log(`Vitesse recalculée pour point ${index}: ${point.speed.toFixed(2)} m/s`)
+          }
+        }
+      }
+    })
+
+    if (pointsWithoutSpeed > 0) {
+      console.log(
+        `${pointsWithoutSpeed} points sans vitesse ont été recalculés dans le détail du trajet`,
+      )
+    }
+  }
+
   return calculateTrackStatistics(track.value)
 })
 
