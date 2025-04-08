@@ -30,11 +30,15 @@ const averageSpeed = ref(0)
 
 // Variables pour le suivi
 let watchId = null
+let positionIntervalId = null // Nouvel identifiant pour l'intervalle de mise à jour de position
 const speedHistory = ref([])
 const timeLabels = ref([])
 
 // Limite de points d'historique à afficher sur le graphique
-const MAX_HISTORY_POINTS = 30
+const MAX_HISTORY_POINTS = 100 // Augmenter cette valeur pour stocker plus de points
+
+// Dernière position connue
+const lastKnownPosition = ref(null)
 
 // Points du tracé pour la carte
 const trackPoints = computed(() => {
@@ -100,9 +104,17 @@ function startRecording() {
 // Mettre en pause l'enregistrement
 function pauseRecording() {
   isPaused.value = true
+
+  // Arrêter le suivi par watchPosition
   if (watchId) {
     navigator.geolocation.clearWatch(watchId)
     watchId = null
+  }
+
+  // Arrêter l'intervalle de récupération de position
+  if (positionIntervalId) {
+    clearInterval(positionIntervalId)
+    positionIntervalId = null
   }
 }
 
@@ -124,9 +136,16 @@ function stopRecording() {
     watchId = null
   }
 
+  // Arrêter l'intervalle de récupération de position
+  if (positionIntervalId) {
+    clearInterval(positionIntervalId)
+    positionIntervalId = null
+  }
+
   // Enregistrer les données de vitesse dans le track
   if (currentTrack.value) {
-    // S'assurer que currentTrack est mis à jour avec l'historique complet
+    // S'assurer que currentTrack est mis à jour avec l'historique complet - tous les points sont inclus
+    // Pas seulement ceux affichés sur le graphique
     const speedData = {
       history: [...speedHistory.value],
       timeLabels: [...timeLabels.value],
@@ -134,8 +153,10 @@ function stopRecording() {
       averageSpeed: averageSpeed.value,
     }
 
+    console.log(`Sauvegarde de ${speedHistory.value.length} points de vitesse`)
+
     // Finaliser le trajet en passant les données de vitesse
-    const finishedTrack = stopTrack({ speedData })
+    const finishedTrack = stopTrack({ speedData, allPoints: true })
     isRecording.value = false
     isPaused.value = false
 
@@ -165,7 +186,25 @@ function startPositionTracking() {
     maximumAge: 0,
   }
 
+  // Utilisons watchPosition pour les mises à jour initiales
   watchId = navigator.geolocation.watchPosition(handlePositionUpdate, handlePositionError, options)
+
+  // Mais aussi ajoutons un interval pour demander activement la position chaque seconde
+  positionIntervalId = setInterval(() => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        handlePositionUpdate(position)
+      },
+      (error) => {
+        // Si erreur lors de l'intervalle, on ne l'affiche pas à l'utilisateur
+        // mais on la log pour debug
+        console.warn('Erreur lors de la mise à jour de position par intervalle:', error)
+      },
+      options,
+    )
+  }, 1000) // Toutes les secondes
+
+  console.log("Démarrage du suivi de position avec un interval d'1 seconde")
 }
 
 // Gérer la mise à jour de position
@@ -183,53 +222,116 @@ function handlePositionUpdate(position) {
       return
     }
 
-    currentPosition.value = {
-      latitude,
-      longitude,
-      accuracy,
-      altitude,
-      speed,
-      timestamp: new Date().toISOString(),
-    }
+    // Vérifier si cette position est significativement différente de la dernière
+    // pour éviter d'enregistrer des positions identiques
+    const isNewPosition =
+      !lastKnownPosition.value ||
+      lastKnownPosition.value.latitude !== latitude ||
+      lastKnownPosition.value.longitude !== longitude
 
-    // Mettre à jour la vitesse actuelle (km/h)
-    currentSpeed.value = speed * 3.6
-
-    // Mettre à jour la vitesse maximale
-    if (currentSpeed.value > maxSpeed.value) {
-      maxSpeed.value = currentSpeed.value
-    }
-
-    // Ajouter le point au trajet si l'enregistrement est actif
-    if (isRecording.value && !isPaused.value) {
-      currentTrack.value = addPointToTrack(currentPosition.value)
-
-      // Mettre à jour la distance
-      if (currentTrack.value) {
-        distance.value = currentTrack.value.distance / 1000
+    // Si c'est une nouvelle position ou si la position a changé, on l'enregistre
+    if (isNewPosition) {
+      currentPosition.value = {
+        latitude,
+        longitude,
+        accuracy,
+        altitude,
+        speed,
+        timestamp: new Date().toISOString(),
       }
 
-      // Ajouter à l'historique de vitesse pour le graphique
-      const currentTime = new Date()
-      timeLabels.value.push(
-        currentTime.toLocaleTimeString('fr-FR', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-      )
-      speedHistory.value.push(currentSpeed.value)
+      // Mettre à jour la dernière position connue
+      lastKnownPosition.value = { ...currentPosition.value }
 
-      // Limiter la taille de l'historique pour le graphique
-      if (speedHistory.value.length > MAX_HISTORY_POINTS) {
-        speedHistory.value = speedHistory.value.slice(-MAX_HISTORY_POINTS)
-        timeLabels.value = timeLabels.value.slice(-MAX_HISTORY_POINTS)
+      // Mettre à jour la vitesse actuelle (km/h)
+      currentSpeed.value = speed * 3.6
+
+      // Mettre à jour la vitesse maximale
+      if (currentSpeed.value > maxSpeed.value) {
+        maxSpeed.value = currentSpeed.value
       }
 
-      // Calculer la vitesse moyenne
-      if (speedHistory.value.length > 0) {
-        const sum = speedHistory.value.reduce((a, b) => a + b, 0)
-        averageSpeed.value = sum / speedHistory.value.length
+      // Ajouter le point au trajet si l'enregistrement est actif
+      if (isRecording.value && !isPaused.value) {
+        // Garder une trace du nombre de points avant l'ajout
+        const pointsCountBefore = currentTrack.value?.points?.length || 0
+
+        currentTrack.value = addPointToTrack(currentPosition.value)
+
+        // Vérifier si le point a réellement été ajouté
+        const pointsCountAfter = currentTrack.value?.points?.length || 0
+        const pointAdded = pointsCountAfter > pointsCountBefore
+
+        if (pointAdded) {
+          console.log(
+            `Point ajouté: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}, vitesse: ${currentSpeed.value.toFixed(2)} km/h`,
+          )
+
+          // Mettre à jour la distance
+          if (currentTrack.value) {
+            distance.value = currentTrack.value.distance / 1000
+          }
+
+          // Ajouter à l'historique de vitesse pour le graphique
+          const currentTime = new Date()
+          timeLabels.value.push(
+            currentTime.toLocaleTimeString('fr-FR', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            }),
+          )
+          speedHistory.value.push(currentSpeed.value)
+
+          // Si nous voulons limiter la taille de l'historique AFFICHÉ sur le graphique, mais
+          // conserver toutes les données
+          let displayHistory = [...speedHistory.value]
+          let displayLabels = [...timeLabels.value]
+
+          if (displayHistory.length > MAX_HISTORY_POINTS) {
+            // Ne limiter que l'affichage, pas les données stockées
+            displayHistory = displayHistory.slice(-MAX_HISTORY_POINTS)
+            displayLabels = displayLabels.slice(-MAX_HISTORY_POINTS)
+          }
+
+          // Mettre à jour le graphique avec les données limitées
+          speedChartData.value = {
+            labels: displayLabels,
+            datasets: [
+              {
+                label: 'Vitesse (km/h)',
+                data: displayHistory,
+                borderColor: '#4CAF50',
+                backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                borderWidth: 2,
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: 'Vitesse moyenne (km/h)',
+                data: Array(displayHistory.length).fill(averageSpeed.value),
+                borderColor: '#2196F3',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                fill: false,
+                pointRadius: 0,
+              },
+            ],
+          }
+
+          // Calculer la vitesse moyenne
+          if (speedHistory.value.length > 0) {
+            const sum = speedHistory.value.reduce((a, b) => a + b, 0)
+            averageSpeed.value = sum / speedHistory.value.length
+          }
+
+          // Log pour débogage
+          if (speedHistory.value.length % 10 === 0) {
+            console.log(
+              `Historique de vitesse: ${speedHistory.value.length} points, dernier point: ${currentSpeed.value} km/h`,
+            )
+          }
+        }
       }
     }
   } catch (error) {
@@ -287,6 +389,11 @@ function cancelRecording() {
     watchId = null
   }
 
+  if (positionIntervalId) {
+    clearInterval(positionIntervalId)
+    positionIntervalId = null
+  }
+
   if (isRecording.value) {
     stopTrack() // Arrêter le trajet sans le sauvegarder complètement
   }
@@ -317,6 +424,11 @@ onUnmounted(() => {
   if (watchId) {
     navigator.geolocation.clearWatch(watchId)
     watchId = null
+  }
+
+  if (positionIntervalId) {
+    clearInterval(positionIntervalId)
+    positionIntervalId = null
   }
 })
 </script>

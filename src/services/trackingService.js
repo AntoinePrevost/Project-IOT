@@ -107,14 +107,26 @@ export function addPointToTrack(position) {
       point.longitude,
     )
 
-    // Seulement ajouter le point s'il est suffisamment éloigné ou si 1 minute s'est écoulée
+    // Modifions les conditions pour accepter plus de points:
+    // 1. Si la distance est suffisante OU
+    // 2. Si le temps écoulé est au moins de 1 seconde
     const timeDiff = new Date(point.timestamp) - new Date(lastPoint.timestamp)
-    if (distance < MINIMUM_DISTANCE && timeDiff < 60000) {
+
+    // Si trop proche ET temps écoulé trop court, on ignore ce point
+    if (distance < MINIMUM_DISTANCE && timeDiff < 1000) {
+      console.log(
+        `Point ignoré: distance(${distance.toFixed(2)}m) < ${MINIMUM_DISTANCE}m et temps(${timeDiff}ms) < 1000ms`,
+      )
       return currentTrack
     }
 
     // Mettre à jour la distance totale
     currentTrack.distance += distance
+    console.log(
+      `Point ajouté: distance parcourue +${distance.toFixed(2)}m, total: ${currentTrack.distance.toFixed(2)}m`,
+    )
+  } else {
+    console.log('Premier point du trajet ajouté')
   }
 
   // Ajouter le point au trajet
@@ -125,6 +137,17 @@ export function addPointToTrack(position) {
     const firstPoint = currentTrack.points[0]
     const lastPoint = currentTrack.points[currentTrack.points.length - 1]
     currentTrack.duration = (new Date(lastPoint.timestamp) - new Date(firstPoint.timestamp)) / 1000
+
+    // Log pour déboguer le problème de durée
+    if (currentTrack.duration === 0) {
+      console.warn('ATTENTION: Durée calculée à 0 secondes!')
+      console.warn('Premier point timestamp:', firstPoint.timestamp)
+      console.warn('Dernier point timestamp:', lastPoint.timestamp)
+      console.warn(
+        'Différence de temps:',
+        new Date(lastPoint.timestamp) - new Date(firstPoint.timestamp),
+      )
+    }
   }
 
   // Enregistrer le trajet mis à jour
@@ -153,12 +176,14 @@ export function stopTrack(extraData = null) {
     Object.assign(currentTrack, extraData)
   }
 
-  // S'assurer que les points ont des données de vitesse
+  // S'assurer que tous les points ont des données de vitesse
   if (currentTrack.points && currentTrack.points.length > 0) {
+    console.log(`Traitement de ${currentTrack.points.length} points pour le calcul de vitesse`)
+
     currentTrack.points = currentTrack.points.map((point, index, points) => {
       // Si le point n'a pas de vitesse et qu'il y a un point précédent,
       // calculer la vitesse approximative
-      if ((point.speed === null || point.speed === undefined) && index > 0) {
+      if ((point.speed === null || point.speed === undefined || point.speed === 0) && index > 0) {
         const prevPoint = points[index - 1]
         const distance = calculateDistance(
           prevPoint.latitude,
@@ -184,6 +209,11 @@ export function stopTrack(extraData = null) {
 
   // Effacer le trajet actif
   localStorage.removeItem(CURRENT_TRACK_KEY)
+
+  console.log(`Trajet ${currentTrack.id} terminé avec ${currentTrack.points.length} points`)
+  if (currentTrack.speedData) {
+    console.log(`Données de vitesse: ${currentTrack.speedData.history.length} points`)
+  }
 
   return currentTrack
 }
@@ -357,6 +387,8 @@ export function calculateTrackStats(trackId) {
     }
   }
 
+  console.log(`Calcul des statistiques pour ${track.points.length} points`)
+
   // Calculer la vitesse moyenne et maximale
   let maxSpeed = 0
   const speeds = []
@@ -385,25 +417,50 @@ export function calculateTrackStats(trackId) {
     }
   })
 
+  console.log(`Points avec vitesse: ${speeds.length} sur ${track.points.length}`)
+
   // Utiliser les données speedData si elles existent, sinon utiliser celles calculées
   const finalSpeedHistory = track.speedData?.history || speedHistory
   const finalTimeLabels = track.speedData?.timeLabels || timeLabels
   const finalMaxSpeed = track.speedData?.maxSpeed || maxSpeed
+
+  console.log(`Historique final: ${finalSpeedHistory.length} points`)
 
   const averageSpeed =
     speeds.length > 0
       ? speeds.reduce((a, b) => a + b, 0) / speeds.length
       : track.distance / 1000 / (track.duration / 3600)
 
-  // ... existing code for elevation calculation ...
+  // Calculer l'élévation (dénivelé)
+  let elevationGain = 0
+  let elevationLoss = 0
+
+  for (let i = 1; i < track.points.length; i++) {
+    const current = track.points[i]
+    const previous = track.points[i - 1]
+
+    if (
+      current.altitude !== null &&
+      previous.altitude !== null &&
+      current.altitude !== undefined &&
+      previous.altitude !== undefined
+    ) {
+      const diff = current.altitude - previous.altitude
+      if (diff > 0) {
+        elevationGain += diff
+      } else {
+        elevationLoss += Math.abs(diff)
+      }
+    }
+  }
 
   return {
     distance: track.distance,
     duration: track.duration,
     averageSpeed: averageSpeed,
     maxSpeed: finalMaxSpeed,
-    elevationGain: 0, // Calculate if needed
-    elevationLoss: 0, // Calculate if needed
+    elevationGain,
+    elevationLoss,
     speedHistory: finalSpeedHistory,
     timeLabels: finalTimeLabels,
   }

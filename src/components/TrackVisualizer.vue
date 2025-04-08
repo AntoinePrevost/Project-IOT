@@ -9,6 +9,18 @@ const props = defineProps({
     type: Object,
     required: true,
   },
+  mapOnly: {
+    type: Boolean,
+    default: false,
+  },
+  chartOnly: {
+    type: Boolean,
+    default: false,
+  },
+  height: {
+    type: String,
+    default: '400px',
+  },
 })
 
 // Points du tracé pour la carte
@@ -61,6 +73,25 @@ const trackStats = computed(() => {
   return calculateTrackStats(props.track)
 })
 
+// Pour les grands trajets, échantillonner les données pour le graphique
+const sampleDataForChart = (data, labels, maxPoints = 500) => {
+  if (!data || data.length <= maxPoints) return { data, labels }
+
+  const step = Math.ceil(data.length / maxPoints)
+  const sampledData = []
+  const sampledLabels = []
+
+  for (let i = 0; i < data.length; i += step) {
+    sampledData.push(data[i])
+    if (labels && labels[i]) {
+      sampledLabels.push(labels[i])
+    }
+  }
+
+  console.log(`Échantillonnage des données: ${data.length} → ${sampledData.length} points`)
+  return { data: sampledData, labels: sampledLabels }
+}
+
 // Données du graphique de vitesse
 const speedChartData = computed(() => {
   // Vérifier d'abord les données dans speedData
@@ -75,12 +106,19 @@ const speedChartData = computed(() => {
       props.track.speedData.history.length,
       'points',
     )
+
+    // Échantillonner les données si nécessaire
+    const { data: sampledHistory, labels: sampledLabels } = sampleDataForChart(
+      props.track.speedData.history,
+      props.track.speedData.timeLabels,
+    )
+
     return {
-      labels: props.track.speedData.timeLabels,
+      labels: sampledLabels,
       datasets: [
         {
           label: 'Vitesse (km/h)',
-          data: props.track.speedData.history,
+          data: sampledHistory,
           borderColor: '#4CAF50',
           backgroundColor: 'rgba(76, 175, 80, 0.2)',
           borderWidth: 2,
@@ -89,9 +127,7 @@ const speedChartData = computed(() => {
         },
         {
           label: 'Vitesse moyenne (km/h)',
-          data: Array(props.track.speedData.history.length).fill(
-            props.track.speedData.averageSpeed,
-          ),
+          data: Array(sampledHistory.length).fill(props.track.speedData.averageSpeed),
           borderColor: '#2196F3',
           borderWidth: 2,
           borderDash: [5, 5],
@@ -185,7 +221,6 @@ const speedChartData = computed(() => {
 
 // Vérifier si nous avons des données de vitesse à afficher
 const hasSpeedData = computed(() => {
-  // Vérifier dans cet ordre:
   // 1. Les données stockées dans speedData
   if (
     props.track.speedData &&
@@ -206,10 +241,14 @@ const hasSpeedData = computed(() => {
 
 // Initialisation au montage du composant
 onMounted(() => {
-  console.log('Trajet chargé:', props.track)
+  console.log('Trajet chargé:', props.track.id)
   console.log('speedData disponible:', !!props.track.speedData)
   console.log('Nombre total de points:', props.track.points?.length || 0)
-  console.log('Premiers points:', props.track.points?.slice(0, 3))
+
+  if (props.track.points && props.track.points.length > 0) {
+    console.log('Premier point:', props.track.points[0])
+    console.log('Dernier point:', props.track.points[props.track.points.length - 1])
+  }
 
   // Vérifier si les points ont des coordonnées valides
   if (props.track && props.track.points && props.track.points.length > 0) {
@@ -230,12 +269,12 @@ onMounted(() => {
 
 <template>
   <div class="track-visualizer">
-    <!-- Carte -->
-    <div class="map-container">
-      <h3>Parcours</h3>
+    <!-- Carte seulement si demandé -->
+    <div v-if="!chartOnly" class="map-container">
+      <h3 v-if="!mapOnly">Parcours</h3>
       <TrackMap
         :points="trackPoints"
-        height="400px"
+        :height="height"
         @map-loaded="() => console.log('Carte chargée')"
       />
       <div v-if="trackPoints.length === 0" class="no-points-message">
@@ -243,18 +282,21 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Graphique de vitesse si disponible -->
-    <div v-if="hasSpeedData" class="chart-container">
-      <h3>Analyse de la vitesse</h3>
-      <SpeedChart :chartData="speedChartData" height="300" />
-    </div>
+    <!-- Graphique seulement si demandé ou les deux -->
+    <template v-if="!mapOnly">
+      <!-- Graphique de vitesse si disponible -->
+      <div v-if="hasSpeedData" class="chart-container">
+        <h3 v-if="!chartOnly">Analyse de la vitesse</h3>
+        <SpeedChart :chartData="speedChartData" :height="chartOnly ? height : 300" />
+      </div>
 
-    <div v-else class="chart-placeholder">
-      <p>
-        <span class="info-icon">ℹ️</span>
-        Aucune donnée de vitesse disponible pour ce trajet
-      </p>
-    </div>
+      <div v-else class="chart-placeholder">
+        <p>
+          <span class="info-icon">ℹ️</span>
+          Aucune donnée de vitesse disponible pour ce trajet
+        </p>
+      </div>
+    </template>
   </div>
 </template>
 

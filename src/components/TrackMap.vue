@@ -157,7 +157,9 @@ const updateMapDisplay = () => {
     }).addTo(map)
 
     // Ajouter des marqueurs pour le début et la fin
-    addStartEndMarkers(props.points)
+    if (props.points.length > 1) {
+      addStartEndMarkers(props.points)
+    }
 
     // Ajouter le marqueur de position actuelle si disponible
     if (props.currentPoint) {
@@ -183,6 +185,26 @@ const updateMapDisplay = () => {
         if (props.points.length > 0) {
           const firstPoint = props.points[0]
           map.setView([firstPoint.latitude, firstPoint.longitude], 13)
+        }
+      }
+    }
+
+    // Ajouter des marqueurs intermédiaires pour mieux visualiser la progression
+    if (props.points.length > 10) {
+      // Ajouter des marqueurs tous les ~10% du trajet
+      const step = Math.max(1, Math.floor(props.points.length / 10))
+      for (let i = 1; i < props.points.length - 1; i += step) {
+        if (i !== 0 && i !== props.points.length - 1) {
+          const point = props.points[i]
+          const marker = window.L.marker([point.latitude, point.longitude], {
+            icon: window.L.divIcon({
+              html: `<div class="intermediate-marker">${Math.round((i / props.points.length) * 100)}%</div>`,
+              className: 'intermediate-marker-icon',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12],
+            }),
+          }).addTo(map)
+          markers.push(marker)
         }
       }
     }
@@ -320,6 +342,24 @@ onMounted(() => {
 
 :global(.start-marker-icon),
 :global(.end-marker-icon) {
+  background: none !important;
+}
+
+:global(.intermediate-marker) {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 10px;
+  color: white;
+  background-color: #ff9800;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+}
+
+:global(.intermediate-marker-icon) {
   background: none !important;
 }
 </style>
